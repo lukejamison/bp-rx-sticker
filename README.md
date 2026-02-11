@@ -36,7 +36,7 @@ cd app
 npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:9000
 
 ### 6. Test on Zebra T56
 
@@ -49,7 +49,7 @@ Open http://localhost:3000
 
 3. **Access the App**
    - Find your computer's IP: `ipconfig getifaddr en0` (Mac) or `ipconfig` (Windows)
-   - On T56, open Chrome and go to: `http://YOUR_IP:3000`
+   - On T56, open Chrome and go to: `http://YOUR_IP:9000`
 
 4. **Test Scanning**
    - Scan a barcode from a recent invoice (last 24 hours)
@@ -88,6 +88,52 @@ bp-rx-sticker/
 - [ ] Reprint button works
 
 ## Common Issues
+
+### 🚨 "Internal Server Error" (500) when scanning
+
+**Common Error 1: "value too long for type character varying(100)"**
+
+Drug names/strengths are too long for database fields.
+
+**Quick Fix:**
+```bash
+ssh luke@172.18.129.154
+PGPASSWORD=3781 psql -h localhost -U luke -d prx_invoices -f ~/prx-api/migrations/002_increase_varchar_limits.sql
+sudo systemctl restart prx-api
+```
+
+📖 See: `FIX_VARCHAR_ERROR.md`
+
+---
+
+**Other 500 errors - Debug with logs:**
+
+```bash
+# 1. Check what's failing
+ssh luke@172.18.129.154 'sudo journalctl -u prx-api -n 50'
+
+# 2. Add detailed logging (see api-logging/add-to-server.js)
+ssh luke@172.18.129.154
+cd ~/prx-api
+npm install morgan
+# (Add logging code to server.js)
+sudo systemctl restart prx-api
+
+# 3. Watch logs in real-time
+ssh luke@172.18.129.154 'sudo journalctl -u prx-api -f'
+```
+
+**📖 Debugging guides:**
+- `FIX_VARCHAR_ERROR.md` - Fix "value too long" error
+- `QUICK_API_DEBUG.md` - Quick reference
+- `API_DEBUG_GUIDE.md` - Comprehensive debugging
+- `diagnose-api-ssh.sh` - Automated testing script
+
+**Common causes:**
+- **VARCHAR too small** → Run migration 002
+- Table missing → Run `setup.sh`
+- StatusChangedOn is NULL → Check database
+- Column name typo → Check API logs
 
 ### "Zebra Browser Print not found"
 - Download and install from Zebra website
@@ -129,7 +175,7 @@ bp-rx-sticker/
 ```bash
 cd app
 npm run dev
-# Access from T56 at http://YOUR_IP:3000
+# Access from T56 at http://YOUR_IP:9000
 ```
 
 ### Option 3: Self-Host (Production Server)

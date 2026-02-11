@@ -7,6 +7,7 @@ import { PrinterStatus } from '@/components/PrinterStatus';
 import { Alert } from '@/components/Alert';
 import { ZebraDiagnostics } from '@/components/ZebraDiagnostics';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { DebugPanel } from '@/components/DebugPanel';
 import { useStore } from '@/lib/store';
 import { useEffect, useState } from 'react';
 
@@ -16,33 +17,49 @@ export default function Home() {
 
   // Load Zebra Browser Print scripts
   useEffect(() => {
+    console.log('='.repeat(60));
+    console.log('🚀 BP RX Sticker App Starting...');
+    console.log('Debug Mode:', process.env.NEXT_PUBLIC_DEBUG);
+    console.log('Mock Print:', process.env.NEXT_PUBLIC_MOCK_PRINT);
+    console.log('API URL:', process.env.NEXT_PUBLIC_API_URL);
+    console.log('='.repeat(60));
+    
     if (typeof window !== 'undefined') {
-      // Load main BrowserPrint library
-      if (!window.BrowserPrint) {
-        const script1 = document.createElement('script');
-        script1.src = '/BrowserPrint-3.1.250.min.js';
-        script1.async = false;
-        script1.onload = () => {
-          console.log('✓ BrowserPrint library loaded');
-          
-          // Load Zebra helper library after main library
-          const script2 = document.createElement('script');
-          script2.src = '/BrowserPrint-Zebra-1.1.250.min.js';
-          script2.async = false;
-          script2.onload = () => {
-            console.log('✓ Zebra helper library loaded');
-            console.log('BrowserPrint available:', !!window.BrowserPrint);
-          };
-          script2.onerror = () => {
-            console.error('❌ Failed to load Zebra helper library');
-          };
-          document.body.appendChild(script2);
-        };
-        script1.onerror = () => {
-          console.error('❌ Failed to load BrowserPrint library');
-        };
-        document.body.appendChild(script1);
+      // Check if already loaded
+      if (window.BrowserPrint) {
+        console.log('✓ BrowserPrint already loaded');
+        return;
       }
+      
+      // Load main BrowserPrint library
+      console.log('📦 Loading BrowserPrint SDK...');
+      const script1 = document.createElement('script');
+      script1.src = '/BrowserPrint-3.1.250.min.js';
+      script1.async = false;
+      script1.onload = () => {
+        console.log('✅ BrowserPrint library loaded successfully');
+        console.log('   Available methods:', Object.keys(window.BrowserPrint || {}));
+        
+        // Load Zebra helper library after main library
+        console.log('📦 Loading Zebra helper library...');
+        const script2 = document.createElement('script');
+        script2.src = '/BrowserPrint-Zebra-1.1.250.min.js';
+        script2.async = false;
+        script2.onload = () => {
+          console.log('✅ Zebra helper library loaded successfully');
+          console.log('   BrowserPrint available:', !!window.BrowserPrint);
+          console.log('   Ready to connect to printers!');
+        };
+        script2.onerror = (e) => {
+          console.error('❌ Failed to load Zebra helper library:', e);
+        };
+        document.body.appendChild(script2);
+      };
+      script1.onerror = (e) => {
+        console.error('❌ Failed to load BrowserPrint library:', e);
+        console.error('   Check that /BrowserPrint-3.1.250.min.js exists in public folder');
+      };
+      document.body.appendChild(script1);
     }
   }, []);
 
@@ -52,12 +69,20 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
       <Alert />
+      <DebugPanel />
 
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">PRX Sticker System</h1>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">BP RX Sticker</h1>
+              {process.env.NEXT_PUBLIC_MOCK_PRINT === 'true' && (
+                <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                  🧪 Mock Print Mode
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-4">
               <PrinterStatus />
               <ThemeToggle />

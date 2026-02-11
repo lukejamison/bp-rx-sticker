@@ -90,7 +90,7 @@ BrowserPrint available: true
 ```bash
 cd app
 npm run dev
-# Access: http://localhost:3000
+# Access: http://localhost:9000
 ```
 
 **Production (Vercel):**
@@ -122,7 +122,7 @@ ls -la app/public/BrowserPrint*
 ```bash
 cd app
 npm run dev
-# Open http://localhost:3000
+# Open http://localhost:9000
 # Click "🔧 Diagnostics"
 ```
 

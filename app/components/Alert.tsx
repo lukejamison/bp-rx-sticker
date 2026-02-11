@@ -21,16 +21,19 @@ export function Alert() {
   return (
     <div className="fixed top-4 right-4 left-4 md:left-auto md:w-96 z-50 animate-slide-in">
       {errorMessage && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-lg">
+        <div className="bg-red-50 dark:bg-red-900/30 border-l-4 border-red-500 p-4 rounded shadow-lg">
           <div className="flex items-start">
             <span className="text-red-500 text-2xl mr-3">✕</span>
             <div className="flex-1">
-              <p className="text-red-900 font-medium">Error</p>
-              <p className="text-red-700 text-sm mt-1">{errorMessage}</p>
+              <p className="text-red-900 dark:text-red-100 font-medium">Error</p>
+              <p className="text-red-700 dark:text-red-300 text-sm mt-1 whitespace-pre-wrap">{errorMessage}</p>
+              <p className="text-red-600 dark:text-red-400 text-xs mt-2">
+                Check browser console (F12) for more details
+              </p>
             </div>
             <button
               onClick={clearMessages}
-              className="text-red-500 hover:text-red-700 ml-2"
+              className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-200 ml-2"
             >
               ✕
             </button>

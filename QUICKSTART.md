@@ -5,9 +5,18 @@
 ```bash
 cd app
 npm run dev
+
+# OR use clean start (recommended):
+./dev-clean.sh
 ```
 
-Open: http://localhost:3000
+Open: http://localhost:9000
+
+**If you get errors about "port in use" or "lock file":**
+```bash
+./dev-stop.sh    # Stop all servers
+./dev-clean.sh   # Start fresh
+```
 
 ## Test on Zebra T56
 
@@ -22,7 +31,7 @@ Open: http://localhost:3000
 
 2. **On T56, open Chrome:**
    ```
-   http://YOUR_IP:3000
+   http://YOUR_IP:9000
    ```
 
 ## Key Files

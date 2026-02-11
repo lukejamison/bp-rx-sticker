@@ -46,8 +46,12 @@ export function ItemRow({ item }: ItemRowProps) {
           <div className="ml-7 space-y-1 text-sm">
             <p className="text-gray-600 dark:text-gray-400">NDC: {item.ndc}</p>
             <div className="flex gap-4">
-              <p className="text-gray-600 dark:text-gray-400">Cost: ${item.cost}</p>
-              <p className="text-gray-600 dark:text-gray-400">Qty: {item.invoiceQty}</p>
+              <p className="text-gray-600 dark:text-gray-400">
+                Cost: ${typeof item.cost === 'number' ? item.cost.toFixed(2) : parseFloat(item.cost || '0').toFixed(2)}
+              </p>
+              <p className="text-gray-600 dark:text-gray-400">
+                Qty: {item.invoiceQty || item.quantity || 'N/A'}
+              </p>
             </div>
           </div>
 

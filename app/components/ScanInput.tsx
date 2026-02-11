@@ -8,22 +8,10 @@ export function ScanInput() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { scanBarcode, scanning, clearMessages } = useStore();
 
-  // Auto-focus on mount and after each scan
+  // Auto-focus on mount and after scanning
   useEffect(() => {
     inputRef.current?.focus();
   }, [scanning]);
-
-  // Re-focus if user clicks away
-  useEffect(() => {
-    const handleClick = () => {
-      if (document.activeElement !== inputRef.current) {
-        inputRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +22,7 @@ export function ScanInput() {
     await scanBarcode(input);
     setInput('');
     
-    // Re-focus after scan
+    // Re-focus after scan completes (for continuous scanning)
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
@@ -46,7 +34,7 @@ export function ScanInput() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={scanning ? 'Processing...' : 'Scan or type barcode...'}
+          placeholder={scanning ? 'Processing...' : 'Scan barcode...'}
           disabled={scanning}
           className="w-full px-6 py-4 text-lg border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:outline-none focus:border-blue-500 dark:focus:border-blue-400 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:cursor-not-allowed"
           autoComplete="off"

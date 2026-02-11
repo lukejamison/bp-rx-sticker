@@ -1,7 +1,7 @@
 {
-  "name": "PRX Sticker System",
-  "short_name": "PRX Sticker",
-  "description": "Invoice item labeling system",
+  "name": "BP RX Sticker System",
+  "short_name": "BP RX Sticker",
+  "description": "Bushard's Pharmacy - Invoice item labeling system",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

@@ -3,8 +3,9 @@ import type {
   InvoiceProgressResponse,
   CompletedItemData,
 } from '@/types';
+import { config, logger } from './config';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://172.18.129.154:3000';
+const API_BASE_URL = config.apiUrl;
 
 export class ApiError extends Error {
   constructor(
@@ -18,24 +19,50 @@ export class ApiError extends Error {
 }
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+  const url = `${API_BASE_URL}${endpoint}`;
+  
+  logger.debug('API Request:', {
+    method: options?.method || 'GET',
+    url,
+    body: options?.body ? JSON.parse(options.body as string) : undefined,
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new ApiError(
-      error.error || error.message || 'API request failed',
-      response.status,
-      error
-    );
-  }
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
 
-  return response.json();
+    logger.debug('API Response:', {
+      status: response.status,
+      ok: response.ok,
+      url,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      logger.error('API Error:', {
+        status: response.status,
+        error,
+        url,
+      });
+      throw new ApiError(
+        error.error || error.message || 'API request failed',
+        response.status,
+        error
+      );
+    }
+
+    const data = await response.json();
+    logger.debug('API Data:', data);
+    return data;
+  } catch (error) {
+    logger.error('API Fetch Failed:', error);
+    throw error;
+  }
 }
 
 export async function lookupBarcode(

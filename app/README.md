@@ -38,8 +38,14 @@ A Progressive Web App for scanning prescription drug invoice items and automatic
 # Install dependencies
 npm install
 
-# Run development server
+# Run development server (runs on port 9000)
 npm run dev
+
+# Or use clean start (kills old servers, clears cache)
+./dev-clean.sh
+
+# Stop all dev servers
+./dev-stop.sh
 
 # Build for production
 npm run build
@@ -53,7 +59,7 @@ npm start
 Edit `.env.local` to set your API URL:
 
 ```env
-NEXT_PUBLIC_API_URL=http://172.18.129.154:3000
+NEXT_PUBLIC_API_URL=http://172.18.129.154:9000
 ```
 
 ## Development
@@ -62,8 +68,8 @@ NEXT_PUBLIC_API_URL=http://172.18.129.154:3000
 # Start dev server
 npm run dev
 
-# Open http://localhost:3000 in your browser
-# Or open on the T56 device at http://YOUR_COMPUTER_IP:3000
+# Open http://localhost:9000 in your browser
+# Or open on the T56 device at http://YOUR_COMPUTER_IP:9000
 ```
 
 ## Deployment
@@ -98,7 +104,7 @@ vercel deploy --prod
 docker build -t prx-sticker .
 
 # Run container
-docker run -p 3000:3000 prx-sticker
+docker run -p 3000:9000 prx-sticker
 ```
 
 ## Usage
@@ -168,6 +174,33 @@ app/
 
 ## Troubleshooting
 
+### "Port in use" or "Unable to acquire lock"
+
+**Problem**: Multiple dev servers running at once
+
+**Quick Fix**:
+```bash
+./dev-stop.sh    # Stop all servers
+./dev-clean.sh   # Clean start
+```
+
+**Manual Fix**:
+```bash
+pkill -f "next dev"    # Kill all Next.js processes
+rm -rf .next           # Clear cache
+npm run dev            # Start fresh
+```
+
+### "Failed to open database" Error
+
+**Problem**: Corrupted Turbopack cache
+
+**Fix**:
+```bash
+rm -rf .next           # Remove cache
+npm run dev            # Restart
+```
+
 ### Printer Not Connecting
 
 1. Check Zebra Browser Print is installed and running
@@ -191,7 +224,7 @@ app/
 
 - Verify API URL in `.env.local`
 - Check T56 is on same network as API server
-- Test API endpoint in browser: `http://172.18.129.154:3000/health`
+- Test API endpoint in browser: `http://172.18.129.154:9000/health`
 
 ## Performance Tips
 

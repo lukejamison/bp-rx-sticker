@@ -1,5 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#2563eb" rx="64"/>
-  <path fill="#fff" d="M128 128h256v48H128zm0 96h256v48H128zm0 96h192v48H128z"/>
-  <path fill="#fff" d="M384 336l-48 48-48-48h96z" opacity="0.7"/>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#grad)" rx="80"/>
+  
+  <!-- BP Text -->
+  <text x="256" y="340" font-family="Arial, sans-serif" font-size="240" font-weight="bold" fill="#ffffff" text-anchor="middle">BP</text>
+  
+  <!-- RX Symbol -->
+  <g transform="translate(256, 120)">
+    <text x="0" y="0" font-family="Arial, sans-serif" font-size="80" font-weight="bold" fill="#ffffff" text-anchor="middle" opacity="0.9">Rx</text>
+  </g>
+  
+  <!-- Subtle border -->
+  <rect width="512" height="512" fill="none" stroke="#1e40af" stroke-width="4" rx="80"/>
 </svg>

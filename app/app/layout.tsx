@@ -2,13 +2,17 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PRX Sticker System",
-  description: "Invoice item labeling system for Bushard's Pharmacy",
+  title: "BP RX Sticker System",
+  description: "Invoice item labeling system for Bushard's Pharmacy - Scan, print, track",
   manifest: "/manifest.json",
+  applicationName: "BP RX Sticker",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "PRX Sticker",
+    title: "BP RX Sticker",
+  },
+  formatDetection: {
+    telephone: false,
   },
 };
 

@@ -93,7 +93,7 @@ To adjust colors, edit `app/app/globals.css`:
    npm run dev
    ```
 
-2. **Open http://localhost:3000**
+2. **Open http://localhost:9000**
 
 3. **Click theme toggle** (sun/moon icon in header)
 
