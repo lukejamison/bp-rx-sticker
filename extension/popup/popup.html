@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BP RX Sticker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>BP RX Sticker</h1>
+      <p class="subtitle">SSCC Scan In only · 1 scan = 1 label</p>
+
+      <label>
+        API URL
+        <input id="apiUrl" type="url" spellcheck="false" />
+      </label>
+
+      <label>
+        Recent invoice window (hours)
+        <input id="hours" type="number" min="1" max="168" />
+      </label>
+
+      <label class="checkbox">
+        <input id="enabled" type="checkbox" />
+        Listen for OneScan scans
+      </label>
+
+      <label class="checkbox">
+        <input id="mockPrint" type="checkbox" />
+        Mock print (lookup only — no label sent to printer)
+      </label>
+
+      <p class="hint">Only active on OneScan → SSCC Scan In (<code>#/ssccScanIn</code>).</p>
+
+      <button id="save">Save settings</button>
+      <button id="ping" type="button" class="secondary">Check OneScan connection</button>
+      <button id="testScan" type="button" class="secondary">Test lookup (sample UPC)</button>
+      <p id="connectionStatus" class="status" aria-live="polite"></p>
+      <p id="saveStatus" class="status" aria-live="polite"></p>
+
+      <section id="lastResult" class="last-result hidden">
+        <h2>Last scan</h2>
+        <div id="lastResultBody"></div>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
