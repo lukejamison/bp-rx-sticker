@@ -20,6 +20,7 @@
         Recent invoice window (hours)
         <input id="hours" type="number" min="1" max="168" />
       </label>
+      <p id="hoursHint" class="hint"></p>
 
       <label class="checkbox">
         <input id="enabled" type="checkbox" />
@@ -31,12 +32,27 @@
         Mock print (lookup only — no label sent to printer)
       </label>
 
-      <p class="hint">Only active on OneScan → SSCC Scan In (<code>#/ssccScanIn</code>).</p>
+      <label>
+        Printer IP
+        <input id="printerIp" type="text" spellcheck="false" placeholder="172.18.129.132" />
+      </label>
+
+      <label>
+        Print bridge URL
+        <input id="printBridgeUrl" type="url" spellcheck="false" placeholder="http://127.0.0.1:9101/print" />
+      </label>
+
+      <p class="hint">Windows: run <code>extension/print-bridge/install-windows.bat</code> as Admin for auto-start at logon.</p>
 
       <button id="save">Save settings</button>
       <button id="ping" type="button" class="secondary">Check OneScan connection</button>
-      <button id="testScan" type="button" class="secondary">Test lookup (sample UPC)</button>
+      <button id="checkBridge" type="button" class="secondary">Check print bridge</button>
+      <button id="testScan" type="button" class="secondary">Test via OneScan tab</button>
+      <button id="testApi" type="button" class="secondary">Test API directly</button>
+      <button id="testPrint" type="button" class="secondary">Test network print</button>
+      <p class="hint">Only active on OneScan → SSCC Scan In (<code>#/ssccScanIn</code>).</p>
       <p id="connectionStatus" class="status" aria-live="polite"></p>
+      <p id="bridgeStatus" class="status" aria-live="polite"></p>
       <p id="saveStatus" class="status" aria-live="polite"></p>
 
       <section id="lastResult" class="last-result hidden">

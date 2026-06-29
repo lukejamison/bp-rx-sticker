@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "BP RX Sticker — OneScan Bridge",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "On SSCC Scan In only: one barcode scan prints one invoice label.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://onescan.lspedia.com/*",
     "http://172.18.129.154:3000/*",
     "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*",
+    "http://127.0.0.1:9101/*",
+    "http://localhost:9101/*",
     "http://*/*"
   ],
   "background": {
@@ -19,7 +20,7 @@
       "matches": ["https://onescan.lspedia.com/*"],
       "js": ["content/shared.js", "lib/zpl.js", "content/print.js", "content/onescan.js"],
       "css": ["content/toast.css"],
-      "run_at": "document_idle"
+      "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [

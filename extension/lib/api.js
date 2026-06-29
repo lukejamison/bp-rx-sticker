@@ -1,5 +1,16 @@
 const DEFAULT_API_URL = 'http://172.18.129.154:3000';
 const DEFAULT_HOURS = 24;
+const WEEKEND_HOURS = 72;
+
+/** Sun/Mon: widen window so Fri/Sat invoices still match (e.g. Monday receiving). */
+function getEffectiveHours(configuredHours) {
+  const day = new Date().getDay();
+  const base = configuredHours ?? DEFAULT_HOURS;
+  if (day === 0 || day === 1) {
+    return Math.max(base, WEEKEND_HOURS);
+  }
+  return base;
+}
 
 async function getSettings() {
   const stored = await chrome.storage.sync.get({
@@ -8,7 +19,11 @@ async function getSettings() {
     mockPrint: true,
     enabled: true,
   });
-  return stored;
+  return {
+    ...stored,
+    configuredHours: stored.hours,
+    hours: getEffectiveHours(stored.hours),
+  };
 }
 
 async function lookupBarcode(apiUrl, code, hours = DEFAULT_HOURS) {
@@ -54,6 +69,8 @@ async function lookupWithCandidates(codes, settings) {
 
 if (typeof self !== 'undefined') {
   self.DEFAULT_API_URL = DEFAULT_API_URL;
+  self.WEEKEND_HOURS = WEEKEND_HOURS;
+  self.getEffectiveHours = getEffectiveHours;
   self.getSettings = getSettings;
   self.lookupBarcode = lookupBarcode;
   self.lookupWithCandidates = lookupWithCandidates;

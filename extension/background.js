@@ -1,4 +1,4 @@
-importScripts('lib/gs1.js', 'lib/api.js');
+importScripts('lib/gs1.js', 'lib/api.js', 'lib/printConfig.js', 'lib/zpl.js');
 
 const LOG_PREFIX = '[BP-RX Sticker BG]';
 const TARGET_HASH = '#/ssccScanIn';
@@ -27,6 +27,9 @@ function buildDedupeKey(raw, parsed) {
 }
 
 async function processScan(raw, meta = {}) {
+  const scanStartedAt = meta.scanStartedAt || Date.now();
+  const apiStart = Date.now();
+
   if (!isTargetPage(meta.page)) {
     warn('Rejected scan from non-target page', meta.page);
     return { ok: false, reason: 'wrong_page' };
@@ -37,6 +40,7 @@ async function processScan(raw, meta = {}) {
     return { ok: false, reason: 'not_barcode_scan' };
   }
 
+  // scan:test goes directly to API — used by popup test button
   log('processScan', raw.slice(0, 80), meta.source);
 
   const settings = await getSettings();
@@ -72,13 +76,14 @@ async function processScan(raw, meta = {}) {
     lookupCodes.unshift(parsed.upc);
   }
 
-  log('lookup codes', lookupCodes);
+  log('lookup codes', lookupCodes, 'hours', settings.hours);
 
   let lookup;
   try {
     lookup = await lookupWithCandidates(lookupCodes, settings);
   } catch (err) {
     warn('lookup failed', err.message, err.tried);
+    const apiMs = Date.now() - apiStart;
     const payload = {
       ok: false,
       status: 'not_found',
@@ -86,11 +91,17 @@ async function processScan(raw, meta = {}) {
       parsed,
       tried: err.tried || lookupCodes,
       at: new Date().toISOString(),
+      timing: {
+        scanStartedAt,
+        apiMs,
+        totalMs: Date.now() - scanStartedAt,
+      },
     };
     await chrome.storage.local.set({ lastResult: payload });
     return payload;
   }
 
+  const apiMs = Date.now() - apiStart;
   const { result, matchedCode } = lookup;
 
   const payload = {
@@ -104,6 +115,11 @@ async function processScan(raw, meta = {}) {
     completed: result.completed,
     completionInfo: result.completionInfo,
     at: new Date().toISOString(),
+    timing: {
+      scanStartedAt,
+      apiMs,
+      totalMs: Date.now() - scanStartedAt,
+    },
   };
 
   await chrome.storage.local.set({ lastResult: payload });
@@ -112,12 +128,57 @@ async function processScan(raw, meta = {}) {
     status: payload.status,
     item: result.item?.itemName,
     mockPrint: settings.mockPrint,
+    apiMs,
   });
 
   return payload;
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'PRINT_ZPL') {
+    getPrintSettings()
+      .then((settings) => printZplViaBridge(message.zpl, settings))
+      .then((data) => sendResponse({ ok: true, ...data }))
+      .catch((err) => {
+        warn('Print failed', err.message);
+        sendResponse({
+          ok: false,
+          error: `${err.message}. Start: node extension/print-bridge/server.js`,
+        });
+      });
+    return true;
+  }
+
+  if (message?.type === 'BRIDGE_HEALTH') {
+    getPrintSettings()
+      .then((settings) => checkPrintBridgeHealth(settings))
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message?.type === 'PRINT_TEST') {
+    getPrintSettings()
+      .then(async (settings) => {
+        const zpl = generateTestLabel(settings);
+        await printZplViaBridge(zpl, settings);
+        sendResponse({ ok: true, printerIp: settings.printerIp });
+      })
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message?.type === 'BP_RX_TEST_API') {
+    processScan(message.raw || '307815770310', {
+      source: 'scan:test',
+      page: '#/ssccScanIn',
+      scanStartedAt: Date.now(),
+    })
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, message: err.message }));
+    return true;
+  }
+
   if (message?.type !== 'BARCODE_SCAN') {
     return false;
   }
@@ -126,6 +187,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     source: message.source,
     page: message.page,
     oneScan: message.oneScan,
+    scanStartedAt: message.scanStartedAt,
   })
     .then(sendResponse)
     .catch((err) => {

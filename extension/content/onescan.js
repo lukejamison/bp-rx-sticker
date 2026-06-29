@@ -10,6 +10,10 @@ let isActive = false;
 let lastInputValue = '';
 let routePollTimer = null;
 let inputPollTimer = null;
+let domCheckTimer = null;
+let hasShownActiveToast = false;
+let bridgeWarningShown = false;
+let gracePeriodEnds = 0;
 
 function isTargetPage() {
   return (
@@ -18,11 +22,8 @@ function isTargetPage() {
   );
 }
 
-function scanDedupeKey(raw, parsed) {
-  if (parsed?.gtin || parsed?.serial || parsed?.lot) {
-    return labelKey(parsed);
-  }
-  return raw.trim();
+function isGracePeriod() {
+  return Date.now() < gracePeriodEnds;
 }
 
 function ensureToastContainer() {
@@ -40,8 +41,8 @@ function removeUi() {
   statusBadge = null;
 }
 
-function ensureStatusBadge(state, force = false) {
-  if (!force && !isActive) return;
+function ensureStatusBadge(state) {
+  if (!isActive) return;
 
   if (!statusBadge || !document.body.contains(statusBadge)) {
     statusBadge = document.createElement('div');
@@ -51,13 +52,14 @@ function ensureStatusBadge(state, force = false) {
     document.body.appendChild(statusBadge);
   }
 
-  const colors = { waiting: '#1e40af', listening: '#166534', error: '#991b1b', idle: '#4b5563' };
+  const colors = { waiting: '#1e40af', listening: '#166534', error: '#991b1b' };
   statusBadge.style.background = colors[state.variant] || colors.waiting;
   statusBadge.textContent = state.text;
 }
 
 function showToast(variant, title, message, meta) {
-  BP_RX.log('toast', variant, title, message, meta || '');
+  if (!isActive) return;
+  BP_RX.log('toast', variant, title, message || '');
 
   const container = ensureToastContainer();
   const toast = document.createElement('div');
@@ -86,53 +88,81 @@ function showToast(variant, title, message, meta) {
 }
 
 function formatParsedMeta(parsed) {
+  if (!parsed) return '';
   const parts = [];
-  if (parsed?.upc) parts.push(`UPC ${parsed.upc}`);
-  if (parsed?.gtin) parts.push(`GTIN ${parsed.gtin}`);
-  if (parsed?.lot) parts.push(`Lot ${parsed.lot}`);
-  if (parsed?.serial) parts.push(`Serial ${parsed.serial}`);
+  if (parsed.upc) parts.push(`UPC ${parsed.upc}`);
+  if (parsed.gtin) parts.push(`GTIN ${parsed.gtin}`);
+  if (parsed.lot) parts.push(`Lot ${parsed.lot}`);
+  if (parsed.serial) parts.push(`Serial ${parsed.serial}`);
   return parts.join(' · ');
 }
 
-async function maybePrintOneLabel(result) {
-  if (result.status !== 'ready_to_print' || result.mockPrint || printInFlight) return;
+async function maybePrintOneLabel(result, parsedHint) {
+  if (result.status !== 'ready_to_print' || result.mockPrint || printInFlight) return 0;
 
   printInFlight = true;
+  const printStart = Date.now();
   try {
+    const printSettings = await chrome.storage.sync.get({
+      printWidth: 448,
+      labelLength: 582,
+    });
+
     const zpl = generateLabel({
       itemName: result.item.itemName,
       ndc: result.item.ndc,
+      upc: result.parsed?.upc || result.matchedCode || result.item.upc,
+      lot: result.parsed?.lot || parsedHint?.lot,
       cost: result.item.cost,
       dateReceived: result.item.lastReceived,
       supplier: result.item.supplier,
+      printWidth: printSettings.printWidth,
+      labelLength: printSettings.labelLength,
     });
     await printOneLabel(zpl);
     result.printed = true;
+    return Date.now() - printStart;
   } finally {
     printInFlight = false;
   }
 }
 
-async function handleScanResult(raw, result, parsedHint) {
-  if (result.reason === 'duplicate') {
-    BP_RX.log('Skipped duplicate scan');
+function finalizeTiming(result, scanStartedAt, printMs = 0) {
+  const timing = {
+    ...(result.timing || {}),
+    printMs: printMs || result.timing?.printMs || 0,
+    totalMs: Date.now() - scanStartedAt,
+  };
+  result.timing = timing;
+  return timing;
+}
+
+async function persistLastResult(result) {
+  await chrome.storage.local.set({ lastResult: result });
+}
+
+async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
+  if (result.reason === 'duplicate' || result.reason === 'wrong_page') {
+    BP_RX.log('Lookup skipped', result.reason);
     return;
   }
   if (result.reason === 'disabled') {
     showToast('warn', 'Extension paused', 'Enable listening in the BP RX popup');
     return;
   }
-  if (result.reason === 'wrong_page') {
-    return;
-  }
+
+  const timingLine = () => BP_RX.formatTiming(finalizeTiming(result, scanStartedAt));
 
   if (!result.ok) {
-    ensureStatusBadge({ variant: 'error', text: 'BP RX: not found' });
+    finalizeTiming(result, scanStartedAt);
+    await persistLastResult(result);
+    BP_RX.log('Scan timing', result.timing);
+    ensureStatusBadge({ variant: 'error', text: `BP RX: not found (${BP_RX.formatDuration(result.timing.totalMs)})` });
     showToast(
       'error',
       'Not on recent invoice',
       result.message || 'No matching item found',
-      formatParsedMeta(result.parsed || parsedHint || {})
+      [formatParsedMeta(result.parsed || parsedHint), timingLine()].filter(Boolean).join(' · ')
     );
     return;
   }
@@ -141,26 +171,50 @@ async function handleScanResult(raw, result, parsedHint) {
   const invoiceNumber = result.invoice?.invoiceNumber || '';
 
   if (result.status === 'already_completed') {
-    ensureStatusBadge({ variant: 'listening', text: 'BP RX: already completed' });
-    showToast('warn', 'Already completed', itemName, invoiceNumber ? `Invoice ${invoiceNumber}` : '');
+    finalizeTiming(result, scanStartedAt);
+    await persistLastResult(result);
+    BP_RX.log('Scan timing', result.timing);
+    ensureStatusBadge({
+      variant: 'listening',
+      text: `BP RX: already completed (${BP_RX.formatDuration(result.timing.totalMs)})`,
+    });
+    showToast(
+      'warn',
+      'Already completed',
+      itemName,
+      [invoiceNumber ? `Invoice ${invoiceNumber}` : null, timingLine()].filter(Boolean).join(' · ')
+    );
     return;
   }
 
   try {
-    await maybePrintOneLabel(result);
-    ensureStatusBadge({ variant: 'listening', text: 'BP RX: label ready' });
+    const printMs = await maybePrintOneLabel(result, parsedHint);
+    finalizeTiming(result, scanStartedAt, printMs);
+    await persistLastResult(result);
+    BP_RX.log('Scan timing', result.timing);
+
+    ensureStatusBadge({
+      variant: 'listening',
+      text: `BP RX: done (${BP_RX.formatDuration(result.timing.totalMs)})`,
+    });
     showToast(
       'success',
       result.mockPrint ? 'Would print 1 label' : 'Printed 1 label',
       itemName,
-      [invoiceNumber ? `Invoice ${invoiceNumber}` : null, formatParsedMeta(result.parsed || parsedHint)]
+      [
+        invoiceNumber ? `Invoice ${invoiceNumber}` : null,
+        formatParsedMeta(result.parsed || parsedHint),
+        timingLine(),
+      ]
         .filter(Boolean)
         .join(' · ')
     );
   } catch (err) {
-    BP_RX.warn('Print failed', err.message);
+    finalizeTiming(result, scanStartedAt);
+    await persistLastResult(result);
+    BP_RX.warn('Print failed', err.message, result.timing);
     ensureStatusBadge({ variant: 'error', text: 'BP RX: print failed' });
-    showToast('error', 'Print failed', itemName, err.message);
+    showToast('error', 'Print failed', itemName, [err.message, timingLine()].join(' · '));
   }
 }
 
@@ -169,7 +223,7 @@ function createSendScan() {
 
   return function sendScan(raw, source, parsedHint) {
     if (!isActive || !isTargetPage()) {
-      BP_RX.log('Ignored scan — not active on SSCC Scan In', { source, hash: location.hash });
+      BP_RX.log('Blocked — not on SSCC Scan In', { source, hash: location.hash });
       return;
     }
 
@@ -180,20 +234,21 @@ function createSendScan() {
 
     const value = (raw || parsedHint?.gtin || '').trim();
     if (value.length < BP_RX.MIN_SCAN_LENGTH && !parsedHint?.gtin) {
-      BP_RX.log('Ignored scan — too short', { source, length: value.length });
+      BP_RX.log('Blocked — value too short', { source, length: value.length });
       return;
     }
 
-    const dedupeKey = parsedHint?.gtin ? labelKey(parsedHint) : scanDedupeKey(value, parsedHint);
+    const dedupeKey = parsedHint?.gtin ? labelKey(parsedHint) : value;
     const now = Date.now();
     const lastAt = recent.get(dedupeKey);
     if (lastAt && now - lastAt < BP_RX.DEDUPE_MS) {
-      BP_RX.log('Ignored duplicate scan', { source, dedupeKey });
+      BP_RX.log('Blocked — duplicate', { source, dedupeKey: dedupeKey.slice(0, 40) });
       return;
     }
     recent.set(dedupeKey, now);
 
-    BP_RX.log('Sending scan to background', { source, preview: value.slice(0, 60), parsedHint });
+    const scanStartedAt = Date.now();
+    BP_RX.log('→ API lookup', { source, preview: value.slice(0, 60), parsedHint });
     ensureStatusBadge({ variant: 'waiting', text: 'BP RX: looking up…' });
 
     chrome.runtime.sendMessage(
@@ -203,32 +258,58 @@ function createSendScan() {
         source,
         page: location.hash,
         oneScan: parsedHint || null,
+        scanStartedAt,
       },
       async (result) => {
         if (chrome.runtime.lastError) {
           BP_RX.warn('sendMessage failed', chrome.runtime.lastError.message);
-          ensureStatusBadge({ variant: 'error', text: 'BP RX: extension error' });
           showToast('error', 'Extension error', 'Reload extension + refresh this tab');
           return;
         }
-
-        BP_RX.log('Lookup result', result);
-        await handleScanResult(value, result || {}, parsedHint);
+        BP_RX.log('← API result', result?.status || result?.reason || result?.ok, result?.timing);
+        await handleScanResult(value, result || {}, parsedHint, scanStartedAt);
       }
     );
   };
 }
 
-function seedExistingLabels() {
-  seenLabels.clear();
+function mergeSeedLabels() {
+  let added = 0;
   document.querySelectorAll(BP_RX.LABELS_SELECTOR).forEach((el) => {
     const parsed = parseOneScanLabel(el.textContent);
-    if (parsed?.gtin) seenLabels.add(labelKey(parsed));
+    if (!parsed?.gtin) return;
+    const key = labelKey(parsed);
+    if (!seenLabels.has(key)) {
+      seenLabels.add(key);
+      added += 1;
+    }
   });
-  BP_RX.log('Seeded existing labels (will not re-print)', seenLabels.size);
+  if (added > 0) {
+    BP_RX.log('Seeded items on page (no API)', { added, total: seenLabels.size });
+  }
+  return added;
 }
 
-function checkForNewDomScan(source) {
+function startGracePeriod() {
+  seenLabels.clear();
+  gracePeriodEnds = Date.now() + BP_RX.GRACE_MS;
+  mergeSeedLabels();
+  BP_RX.log('Grace period started — existing items will not trigger lookup', {
+    seconds: BP_RX.GRACE_MS / 1000,
+  });
+
+  [1000, 2500, 5000, 7000].forEach((ms) => {
+    setTimeout(() => {
+      if (!isActive) return;
+      mergeSeedLabels();
+      if (ms >= BP_RX.GRACE_MS - 500) {
+        BP_RX.log('Grace period ending — new scans will trigger lookup');
+      }
+    }, ms);
+  });
+}
+
+function checkForNewScan(source) {
   if (!isActive) return;
 
   document.querySelectorAll(BP_RX.LABELS_SELECTOR).forEach((el) => {
@@ -239,9 +320,28 @@ function checkForNewDomScan(source) {
     if (seenLabels.has(key)) return;
 
     seenLabels.add(key);
-    BP_RX.log('New OneScan item detected', { source, parsed });
+
+    if (isGracePeriod()) {
+      BP_RX.log('New item during grace — seeded only', { gtin: parsed.gtin });
+      return;
+    }
+
+    BP_RX.log('New scan detected (OneScan added item)', { source, gtin: parsed.gtin });
     sendScanFn(parsed.gtin, 'scan:dom-new', parsed);
   });
+}
+
+function scheduleDomCheck(source) {
+  clearTimeout(domCheckTimer);
+  domCheckTimer = setTimeout(() => checkForNewScan(source), 300);
+}
+
+function nodeHasScanResult(node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  return (
+    node.matches?.('.labels-area, .item-container.scanned') ||
+    !!node.querySelector?.('.labels-area, .item-container.scanned')
+  );
 }
 
 function attachBarcodeListener(input) {
@@ -253,6 +353,8 @@ function attachBarcodeListener(input) {
   let lastNonEmpty = '';
   let keyBuffer = '';
   let keyIdleTimer = null;
+
+  input.addEventListener('focus', () => BP_RX.log('Barcode field focused'), true);
 
   const flushKeyBuffer = () => {
     const buffered = keyBuffer.trim();
@@ -266,7 +368,6 @@ function attachBarcodeListener(input) {
     'keydown',
     (event) => {
       if (!isActive) return;
-      BP_RX.log('keydown on barcode field', event.key.length === 1 ? event.key : event.key);
       if (event.key.length === 1) {
         keyBuffer += event.key;
         clearTimeout(keyIdleTimer);
@@ -281,14 +382,14 @@ function attachBarcodeListener(input) {
     () => {
       if (!isActive) return;
       const value = input.value;
-      BP_RX.log('input event on barcode field', { length: value.length });
+      BP_RX.log('Barcode input event', { length: value.length });
 
       if (value.length >= BP_RX.MIN_SCAN_LENGTH) {
         lastNonEmpty = value;
       }
 
       if (lastNonEmpty.length >= BP_RX.MIN_SCAN_LENGTH && value.length === 0) {
-        BP_RX.log('Input cleared after scan');
+        BP_RX.log('Barcode input cleared');
         sendScanFn(lastNonEmpty, 'scan:input-cleared');
         flushKeyBuffer();
         lastNonEmpty = '';
@@ -307,8 +408,26 @@ function scanForBarcodeFields(root = document) {
   return fields.length;
 }
 
+function stopTimers() {
+  if (inputPollTimer) {
+    clearInterval(inputPollTimer);
+    inputPollTimer = null;
+  }
+  if (domCheckTimer) {
+    clearTimeout(domCheckTimer);
+    domCheckTimer = null;
+  }
+}
+
+function stopObservers() {
+  fieldObserver?.disconnect();
+  domObserver?.disconnect();
+  fieldObserver = null;
+  domObserver = null;
+}
+
 function startInputPoll() {
-  if (inputPollTimer) clearInterval(inputPollTimer);
+  if (inputPollTimer) return;
   inputPollTimer = setInterval(() => {
     if (!isActive) return;
     const input = document.querySelector(BP_RX.BARCODE_SELECTOR);
@@ -318,33 +437,75 @@ function startInputPoll() {
     if (value === lastInputValue) return;
 
     if (lastInputValue.length >= BP_RX.MIN_SCAN_LENGTH && value.length === 0) {
-      BP_RX.log('Poll detected input clear', lastInputValue.slice(0, 40));
+      BP_RX.log('Poll detected barcode input clear');
       sendScanFn(lastInputValue, 'scan:poll-cleared');
     }
-
     lastInputValue = value;
-  }, 100);
-}
-
-function stopInputPoll() {
-  if (inputPollTimer) {
-    clearInterval(inputPollTimer);
-    inputPollTimer = null;
-  }
+  }, 400);
 }
 
 function watchDomScans() {
-  if (domObserver) domObserver.disconnect();
+  if (domObserver) return;
 
-  domObserver = new MutationObserver(() => {
-    checkForNewDomScan('mutation');
+  domObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (nodeHasScanResult(node)) {
+          scheduleDomCheck('mutation');
+          return;
+        }
+      }
+    }
   });
 
-  domObserver.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    characterData: true,
+  if (document.body) {
+    domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+}
+
+function watchBarcodeField() {
+  if (fieldObserver) return;
+
+  fieldObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (node.matches?.(BP_RX.BARCODE_SELECTOR)) {
+          attachBarcodeListener(node);
+        } else {
+          scanForBarcodeFields(node);
+        }
+      }
+    }
   });
+
+  if (document.body) {
+    fieldObserver.observe(document.body, { childList: true, subtree: true });
+  }
+}
+
+async function maybeWarnBridgeDown() {
+  if (!BP_RX.hasRuntime()) return;
+
+  const { mockPrint = true } = await chrome.storage.sync.get({ mockPrint: true });
+  if (mockPrint) return;
+
+  try {
+    const health = await chrome.runtime.sendMessage({ type: 'BRIDGE_HEALTH' });
+    if (health?.ok) return;
+    if (bridgeWarningShown) return;
+    bridgeWarningShown = true;
+    showToast(
+      'error',
+      'Print bridge not running',
+      health?.error || 'Run install-windows.bat on this PC or start server.js'
+    );
+  } catch {
+    if (!bridgeWarningShown) {
+      bridgeWarningShown = true;
+      showToast('error', 'Print bridge not running', 'Start the print bridge on this PC');
+    }
+  }
 }
 
 function activate() {
@@ -352,16 +513,19 @@ function activate() {
     deactivate();
     return;
   }
-  if (isActive) {
-    scanForBarcodeFields();
-    return;
+
+  const wasActive = isActive;
+  isActive = true;
+
+  if (!wasActive) {
+    BP_RX.log('ACTIVE on SSCC Scan In');
+    hasShownActiveToast = false;
+    bridgeWarningShown = false;
+    startGracePeriod();
   }
 
-  isActive = true;
-  BP_RX.log('ACTIVE on SSCC Scan In', location.hash);
-
-  seedExistingLabels();
   const fieldCount = scanForBarcodeFields();
+  watchBarcodeField();
   watchDomScans();
   startInputPoll();
 
@@ -369,84 +533,86 @@ function activate() {
     variant: fieldCount > 0 ? 'listening' : 'waiting',
     text: fieldCount > 0 ? 'BP RX: ready — scan a barcode' : 'BP RX: waiting for barcode field…',
   });
-  showToast('info', 'BP RX Sticker active', 'Scan a product — 1 scan = 1 label lookup');
 
-  if (fieldObserver) fieldObserver.disconnect();
-  fieldObserver = new MutationObserver(() => {
-    if (!isActive) return;
-    const count = scanForBarcodeFields(document);
-    if (count > 0) {
-      ensureStatusBadge({ variant: 'listening', text: 'BP RX: ready — scan a barcode' });
-    }
-  });
-  fieldObserver.observe(document.documentElement, { childList: true, subtree: true });
-}
-
-function deactivate() {
-  isActive = false;
-  stopInputPoll();
-  fieldObserver?.disconnect();
-  domObserver?.disconnect();
-  fieldObserver = null;
-  domObserver = null;
-  BP_RX.log('Inactive (not on SSCC Scan In)', location.hash);
-  ensureStatusBadge({ variant: 'idle', text: 'BP RX: inactive — open SSCC Scan In' }, true);
-}
-
-function syncRoute() {
-  if (isTargetPage()) {
-    activate();
-  } else {
-    deactivate();
+  if (!hasShownActiveToast) {
+    hasShownActiveToast = true;
+    showToast('info', 'BP RX Sticker active', 'Scan a product — 1 scan = 1 label');
+    maybeWarnBridgeDown();
   }
 }
 
+function deactivate() {
+  gracePeriodEnds = 0;
+  if (!isActive) {
+    removeUi();
+    return;
+  }
+
+  isActive = false;
+  hasShownActiveToast = false;
+  bridgeWarningShown = false;
+  stopTimers();
+  stopObservers();
+  seenLabels.clear();
+  removeUi();
+  BP_RX.log('Inactive — left SSCC Scan In');
+}
+
+function syncRoute() {
+  if (isTargetPage()) activate();
+  else deactivate();
+}
+
 function boot() {
-  sendScanFn = createSendScan();
+  try {
+    sendScanFn = createSendScan();
+    BP_RX.log('onescan.js booted', { hash: location.hash, target: isTargetPage() });
 
-  BP_RX.log('onescan.js booted', {
-    hash: location.hash,
-    target: isTargetPage(),
-    runtime: BP_RX.hasRuntime(),
-  });
-
-  syncRoute();
-
-  window.addEventListener('hashchange', () => {
-    BP_RX.log('hashchange', location.hash);
     syncRoute();
-  });
 
-  if (routePollTimer) clearInterval(routePollTimer);
-  routePollTimer = setInterval(syncRoute, 1000);
+    window.addEventListener('hashchange', () => {
+      BP_RX.log('hashchange', location.hash);
+      syncRoute();
+    });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === 'BP_RX_PING') {
-      sendResponse({
-        ok: true,
-        active: isActive,
-        hash: location.hash,
-        target: isTargetPage(),
-        fields: document.querySelectorAll(BP_RX.BARCODE_SELECTOR).length,
-        seenLabels: seenLabels.size,
-        runtime: BP_RX.hasRuntime(),
-      });
-      return true;
-    }
+    if (routePollTimer) clearInterval(routePollTimer);
+    routePollTimer = setInterval(syncRoute, 3000);
 
-    if (message?.type === 'BP_RX_TEST_SCAN') {
-      BP_RX.log('Test scan requested from popup');
-      sendScanFn(message.raw || '307815770310', 'scan:test');
-      sendResponse({ ok: true });
-      return true;
-    }
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type === 'BP_RX_PING') {
+        sendResponse({
+          ok: true,
+          active: isActive,
+          gracePeriod: isGracePeriod(),
+          seededCount: seenLabels.size,
+          hash: location.hash,
+          target: isTargetPage(),
+          fields: document.querySelectorAll(BP_RX.BARCODE_SELECTOR).length,
+          runtime: BP_RX.hasRuntime(),
+        });
+        return true;
+      }
 
-    return false;
-  });
+      if (message?.type === 'BP_RX_TEST_SCAN') {
+        if (!isTargetPage()) {
+          sendResponse({ ok: false, error: 'Not on SSCC Scan In page' });
+          return true;
+        }
+        BP_RX.log('Test scan from popup');
+        sendScanFn(message.raw || '307815770310', 'scan:test');
+        sendResponse({ ok: true });
+        return true;
+      }
+
+      return false;
+    });
+  } catch (err) {
+    BP_RX.warn('Boot failed', err.message);
+  }
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot);
+  window.addEventListener('load', boot);
 } else {
   boot();
 }

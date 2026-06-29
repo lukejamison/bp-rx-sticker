@@ -4,6 +4,7 @@ import type {
   CompletedItemData,
 } from '@/types';
 import { config, logger } from './config';
+import { getEffectiveInvoiceHours } from './invoiceWindow';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -67,10 +68,11 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
 export async function lookupBarcode(
   code: string,
-  hours: number = 24
+  hours: number = config.defaultTimeWindow
 ): Promise<LookupResponse> {
+  const effectiveHours = getEffectiveInvoiceHours(hours);
   return fetchApi<LookupResponse>(
-    `/api/items/barcode/${encodeURIComponent(code)}/recent?hours=${hours}`
+    `/api/items/barcode/${encodeURIComponent(code)}/recent?hours=${effectiveHours}`
   );
 }
 

@@ -6,6 +6,7 @@ const BP_RX = {
   LABELS_SELECTOR: '.item-container.scanned .labels-area, .labels-area',
   MIN_SCAN_LENGTH: 8,
   DEDUPE_MS: 4000,
+  GRACE_MS: 8000,
 
   log(...args) {
     console.log(this.LOG_PREFIX, ...args);
@@ -17,6 +18,23 @@ const BP_RX = {
 
   hasRuntime() {
     return typeof chrome !== 'undefined' && !!chrome.runtime?.id;
+  },
+
+  formatDuration(ms) {
+    if (ms == null || Number.isNaN(ms)) return '—';
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
+  },
+
+  formatTiming(timing) {
+    if (!timing) return '';
+    const parts = [];
+    if (timing.apiMs != null) parts.push(`API ${this.formatDuration(timing.apiMs)}`);
+    if (timing.printMs != null && timing.printMs > 0) {
+      parts.push(`print ${this.formatDuration(timing.printMs)}`);
+    }
+    if (timing.totalMs != null) parts.push(`total ${this.formatDuration(timing.totalMs)}`);
+    return parts.join(' · ');
   },
 };
 
