@@ -6,12 +6,14 @@
 #   ./send-test-label.sh 172.18.129.132
 #   ./send-test-label.sh 172.18.129.132 /path/to/label.zpl
 #
-# Label media (from printer): PW 448, LL 582 (~2.1" x 2.85" at 203 dpi)
+# Label media: PW 203, LL 102 (1" x 0.5" at 203 dpi)
+# Default file: sample-price-sticker.zpl
+# If top is cut off, try: sample-price-sticker-offset20.zpl (more top margin)
 
 set -euo pipefail
 
 PRINTER_IP="${1:-172.18.129.132}"
-ZPL_FILE="${2:-$(dirname "$0")/sample-label.zpl}"
+ZPL_FILE="${2:-$(dirname "$0")/sample-price-sticker.zpl}"
 PORT="${PRINTER_PORT:-9100}"
 
 if [[ ! -f "$ZPL_FILE" ]]; then

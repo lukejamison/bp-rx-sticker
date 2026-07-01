@@ -26,6 +26,22 @@ function buildDedupeKey(raw, parsed) {
   return parsed.upc || raw.trim();
 }
 
+function buildLabelZpl(lastResult, printSettings) {
+  if (!lastResult?.item) return null;
+
+  return generateLabel({
+    itemName: lastResult.item.itemName,
+    ndc: lastResult.item.ndc,
+    upc: lastResult.parsed?.upc || lastResult.matchedCode || lastResult.item.upc,
+    lot: lastResult.parsed?.lot,
+    cost: lastResult.item.cost,
+    dateReceived: lastResult.item.lastReceived,
+    supplier: lastResult.item.supplier,
+    printWidth: printSettings.printWidth,
+    labelLength: printSettings.labelLength,
+  });
+}
+
 async function processScan(raw, meta = {}) {
   const scanStartedAt = meta.scanStartedAt || Date.now();
   const apiStart = Date.now();
@@ -153,6 +169,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     getPrintSettings()
       .then((settings) => checkPrintBridgeHealth(settings))
       .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message?.type === 'REPRINT_LAST') {
+    getPrintSettings()
+      .then(async (printSettings) => {
+        const { lastResult } = await chrome.storage.local.get('lastResult');
+        if (!lastResult?.item) {
+          throw new Error('No scan to reprint yet');
+        }
+        if (!lastResult.ok && lastResult.status !== 'already_completed') {
+          throw new Error('Last scan did not produce a printable label');
+        }
+
+        const settings = await getSettings();
+        if (settings.mockPrint && !message.force) {
+          return sendResponse({
+            ok: false,
+            error: 'Mock print is ON — use Settings to disable, or reprint forces print',
+          });
+        }
+
+        const zpl = buildLabelZpl(lastResult, printSettings);
+        if (!zpl) throw new Error('Could not build label from last scan');
+
+        const data = await printZplViaBridge(zpl, printSettings);
+        sendResponse({ ok: true, ...data, itemName: lastResult.item.itemName });
+      })
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
