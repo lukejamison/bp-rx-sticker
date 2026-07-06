@@ -1,4 +1,4 @@
-# One test label through the bridge — copy/paste safe for DELIVERY01.
+# One test label through the bridge - copy/paste safe for DELIVERY01.
 #   powershell -ExecutionPolicy Bypass -File extension\print-bridge\test-one-print.ps1
 
 $ErrorActionPreference = 'Stop'

@@ -1,11 +1,11 @@
-# BP RX Print Bridge — NUCLEAR RESET
+# BP RX Print Bridge - NUCLEAR RESET
 #
 # Wipes every trace of the bridge (scheduled task, all node/powershell processes,
-# anything holding port 9101) and reinstalls it clean, fully automated — no prompts.
+# anything holding port 9101) and reinstalls it clean, fully automated - no prompts.
 #
 # HOW TO RUN (PowerShell ISE):
 #   1. Open this file in ISE (right-click -> Edit, or File -> Open)
-#   2. Run ISE "as Administrator" if you can (scheduled task step needs it —
+#   2. Run ISE "as Administrator" if you can (scheduled task step needs it -
 #      the script still does everything else and tells you clearly if it's missing)
 #   3. Press F5, or click the green Run button
 #
@@ -37,11 +37,11 @@ function Test-Admin {
 }
 
 Write-Host '=====================================================' -ForegroundColor White
-Write-Host ' BP RX PRINT BRIDGE — NUCLEAR RESET'                    -ForegroundColor White
+Write-Host ' BP RX PRINT BRIDGE - NUCLEAR RESET'                    -ForegroundColor White
 Write-Host '=====================================================' -ForegroundColor White
 Write-Host "Repo: $RepoRoot"
 Write-Host "Bridge dir: $BridgeDir"
-Write-Host "Admin: $(if (Test-Admin) { 'YES' } else { 'NO — scheduled task step may fail, see note at end' })"
+Write-Host "Admin: $(if (Test-Admin) { 'YES' } else { 'NO - scheduled task step may fail, see note at end' })"
 
 # ---------------------------------------------------------------------------
 Write-Step 'Step 1: Stop and remove the scheduled task'
@@ -77,7 +77,7 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     )
   } |
   ForEach-Object {
-    Write-Note "Killing PID $($_.ProcessId): $($_.Name) — $($_.CommandLine)"
+    Write-Note "Killing PID $($_.ProcessId): $($_.Name) - $($_.CommandLine)"
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     $killedProcs++
   }
@@ -88,8 +88,8 @@ Start-Sleep -Seconds 2
 $stillListening = Get-NetTCPConnection -LocalPort $BridgePort -State Listen -ErrorAction SilentlyContinue
 if ($stillListening) {
   $stuckPids = ($stillListening | Select-Object -ExpandProperty OwningProcess) -join ', '
-  Write-Bad "Port $BridgePort is STILL in use by PID(s) $stuckPids — reboot the PC before continuing"
-  Write-Host "`nStopping here — reboot and re-run this script." -ForegroundColor Red
+  Write-Bad "Port $BridgePort is STILL in use by PID(s) $stuckPids - reboot the PC before continuing"
+  Write-Host "`nStopping here - reboot and re-run this script." -ForegroundColor Red
   return
 }
 Write-Good "Port $BridgePort is clear"
@@ -108,7 +108,7 @@ if ($monitorTask -and $monitorTask.State -eq 'Running') {
   $monitorStopped = $true
 }
 if ($monitorStopped) {
-  Write-Good 'Tray monitor paused — remember to relaunch it manually after this finishes'
+  Write-Good 'Tray monitor paused - remember to relaunch it manually after this finishes'
 } else {
   Write-Note 'Tray monitor was not running (nothing to pause)'
 }
@@ -140,7 +140,7 @@ if (Test-Path (Join-Path $RepoRoot '.git')) {
     Pop-Location
   }
 } else {
-  Write-Note "$RepoRoot is not a git repo — skipping git pull"
+  Write-Note "$RepoRoot is not a git repo - skipping git pull"
 }
 
 # ---------------------------------------------------------------------------
@@ -182,7 +182,7 @@ Write-Good "Wrote $ConfigPath (PRINTER_IP=$PrinterIp)"
 # ---------------------------------------------------------------------------
 Write-Step 'Step 7: Register a fresh scheduled task (auto-start at logon, auto-restart)'
 if (-not (Test-Admin)) {
-  Write-Bad 'Not running as Administrator — cannot register the scheduled task.'
+  Write-Bad 'Not running as Administrator - cannot register the scheduled task.'
   Write-Note 'Close this, reopen PowerShell ISE with "Run as administrator", and re-run this script.'
   Write-Note "For now, starting the bridge manually instead (won't survive reboot/logoff)."
   Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$StartScript`"" -WindowStyle Normal
@@ -235,7 +235,7 @@ if (-not $health -or -not $health.ok) {
 
 Write-Good "Bridge is up: $($health | ConvertTo-Json -Compress)"
 if ($health.queueDepth -gt 0) {
-  Write-Bad "queueDepth=$($health.queueDepth) — a job is stuck immediately after a clean start. Something is very wrong; send this whole output."
+  Write-Bad "queueDepth=$($health.queueDepth) - a job is stuck immediately after a clean start. Something is very wrong; send this whole output."
 }
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ try {
 if ($printerOk) {
   Write-Good "Printer $($health.printerIp):9100 is reachable"
 } else {
-  Write-Bad "Printer $($health.printerIp):9100 is NOT reachable — check the printer is powered on and on the network"
+  Write-Bad "Printer $($health.printerIp):9100 is NOT reachable - check the printer is powered on and on the network"
 }
 
 # ---------------------------------------------------------------------------
@@ -286,11 +286,11 @@ for ($i = 1; $i -le 3; $i++) {
 # ---------------------------------------------------------------------------
 Write-Host "`n=====================================================" -ForegroundColor White
 if (($results -notcontains $false) -and $printerOk -and $health.ok) {
-  Write-Host ' RESULT: PASS — bridge reset clean, 3/3 prints succeeded' -ForegroundColor Green
+  Write-Host ' RESULT: PASS - bridge reset clean, 3/3 prints succeeded' -ForegroundColor Green
   Write-Host ' Next: reload the Chrome extension (chrome://extensions -> Reload),' -ForegroundColor Green
   Write-Host ' then try a real scan.' -ForegroundColor Green
 } else {
-  Write-Host ' RESULT: FAIL — see FAIL lines above' -ForegroundColor Red
+  Write-Host ' RESULT: FAIL - see FAIL lines above' -ForegroundColor Red
   Write-Host " Send this entire output, plus: $LogDir\server-$(Get-Date -Format 'yyyy-MM-dd').log" -ForegroundColor Red
 }
 Write-Host '=====================================================' -ForegroundColor White
@@ -302,5 +302,5 @@ if (-not (Test-Admin)) {
 }
 
 if ($monitorStopped) {
-  Write-Host "`nNOTE: the tray monitor app was paused during this reset — relaunch it manually." -ForegroundColor Yellow
+  Write-Host "`nNOTE: the tray monitor app was paused during this reset - relaunch it manually." -ForegroundColor Yellow
 }

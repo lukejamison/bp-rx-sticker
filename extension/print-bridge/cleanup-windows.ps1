@@ -1,7 +1,7 @@
-# BP RX Sticker — Windows workstation cleanup (DELIVERY01 and other scan PCs)
+# BP RX Sticker - Windows workstation cleanup (DELIVERY01 and other scan PCs)
 # Finds duplicate repo copies, orphan bridge processes, and config drift.
 #
-# Usage (read-only report — safe default):
+# Usage (read-only report - safe default):
 #   powershell -ExecutionPolicy Bypass -File cleanup-windows.ps1
 #
 # Apply fixes (kill orphan node, optional remove stale duplicate folders):
@@ -27,7 +27,7 @@ function Write-Ok($msg) { Write-Host "  OK   $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "  WARN $msg" -ForegroundColor Yellow }
 function Write-Info($msg) { Write-Host "  INFO $msg" }
 
-Write-Host 'BP RX Sticker — Windows cleanup' -ForegroundColor White
+Write-Host 'BP RX Sticker - Windows cleanup' -ForegroundColor White
 Write-Host "Mode: $(if ($Apply) { 'APPLY (will make changes)' } else { 'REPORT ONLY (pass -Apply to fix)' })"
 Write-Host "Computer: $env:COMPUTERNAME  User: $env:USERDOMAIN\$env:USERNAME"
 
@@ -68,7 +68,7 @@ if ($repoHits.Count -eq 0) {
     if ($repoHits.Count -gt 1) { Write-Warn $line } else { Write-Ok $line }
   }
   if ($repoHits.Count -gt 1) {
-    Write-Warn 'Multiple repo copies found — Chrome should load unpacked extension from ONE folder only.'
+    Write-Warn 'Multiple repo copies found - Chrome should load unpacked extension from ONE folder only.'
     Write-Info 'Keep the newest copy with your latest zpl.js; delete or archive the rest after verifying prints.'
     $newest = ($repoHits | Sort-Object Modified -Descending | Select-Object -First 1).Path
     Write-Info "Suggested canonical path: $newest"
@@ -86,7 +86,7 @@ if ($repoHits.Count -eq 0) {
 }
 
 Write-Section 'Chrome extension (manual check)'
-Write-Info 'Open chrome://extensions — ensure only ONE "BP RX Sticker" entry is loaded.'
+Write-Info 'Open chrome://extensions - ensure only ONE "BP RX Sticker" entry is loaded.'
 Write-Info 'If two exist, Remove the old one; keep the folder that matches "Suggested canonical path" above.'
 Write-Info 'After file updates: click Reload on the extension, then refresh OneScan.'
 
@@ -102,7 +102,7 @@ if ($portListeners) {
     if ($inList) {
       Write-Ok "Port $BridgePort listener PID $lpid (matches bridge node)"
     } else {
-      Write-Warn "Port $BridgePort listener PID $lpid (ZOMBIE — not in bridge node list; blocks new bridge)"
+      Write-Warn "Port $BridgePort listener PID $lpid (ZOMBIE - not in bridge node list; blocks new bridge)"
     }
   }
 } else {
@@ -114,7 +114,7 @@ if (-not $bridgeNodes -or $bridgeNodes.Count -eq 0) {
 } elseif ($bridgeNodes.Count -eq 1) {
   Write-Ok "One bridge node PID $($bridgeNodes[0].ProcessId)"
 } else {
-  Write-Warn "Multiple bridge node processes ($($bridgeNodes.Count)) — can cause port $BridgePort conflicts."
+  Write-Warn "Multiple bridge node processes ($($bridgeNodes.Count)) - can cause port $BridgePort conflicts."
   $bridgeNodes | ForEach-Object { Write-Info "  PID $($_.ProcessId)  $($_.CommandLine)" }
   if ($Apply) {
     $bridgeNodes | ForEach-Object {
@@ -154,7 +154,7 @@ try {
     Write-Warn "Bridge responded but ok=false at $healthUrl"
   }
 } catch {
-  Write-Warn "Bridge not reachable at $healthUrl — $($_.Exception.Message)"
+  Write-Warn "Bridge not reachable at $healthUrl - $($_.Exception.Message)"
   if ($Apply) {
     Write-Info 'Try: tray -> Restart print bridge, or install-windows.bat as Administrator'
   }

@@ -1,4 +1,4 @@
-# BP RX — one-shot print diagnostics for DELIVERY01 (or any scan PC).
+# BP RX - one-shot print diagnostics for DELIVERY01 (or any scan PC).
 # Collects everything IT needs in one file. Run:
 #   powershell -ExecutionPolicy Bypass -File extension\print-bridge\diagnose-print.ps1
 #
@@ -48,7 +48,7 @@ if ($listeners) {
     Write-Report "LISTEN pid=$($l.OwningProcess) process=$($proc.ProcessName) path=$($proc.Path)"
   }
 } else {
-  Write-Report 'NOT LISTENING — bridge is not running on 9101'
+  Write-Report 'NOT LISTENING - bridge is not running on 9101'
 }
 
 Section 'Node processes (print-bridge)'
@@ -72,16 +72,16 @@ try {
   $health = Invoke-RestMethod -Uri 'http://127.0.0.1:9101/health' -TimeoutSec 5
   Write-Report ($health | ConvertTo-Json -Depth 4)
   if ($health.queueDepth -gt 0) {
-    Write-Report "CRITICAL: queueDepth=$($health.queueDepth) — a print job is STUCK. Run reset-bridge.ps1"
+    Write-Report "CRITICAL: queueDepth=$($health.queueDepth) - a print job is STUCK. Run reset-bridge.ps1"
   }
   $listenerPid = (Get-NetTCPConnection -LocalPort 9101 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
   if ($health.pid -and $listenerPid -and $health.pid -ne $listenerPid) {
-    Write-Report "CRITICAL: health pid=$($health.pid) but port 9101 owned by PID $listenerPid — zombie bridge. Run reset-bridge.ps1"
+    Write-Report "CRITICAL: health pid=$($health.pid) but port 9101 owned by PID $listenerPid - zombie bridge. Run reset-bridge.ps1"
   }
   if (-not $health.bridgeVersion) {
-    Write-Report 'WARN: bridgeVersion missing — old server.js. git pull then reset-bridge.ps1'
+    Write-Report 'WARN: bridgeVersion missing - old server.js. git pull then reset-bridge.ps1'
   } elseif ($health.bridgeVersion -ne '0.4.4') {
-    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.4 — git pull then reset-bridge.ps1"
+    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.4 - git pull then reset-bridge.ps1"
   }
   $printerIp = $health.printerIp
 } catch {
@@ -100,13 +100,13 @@ try {
   $async = $tcp.BeginConnect($printerIp, 9100, $null, $null)
   $ok = $async.AsyncWaitHandle.WaitOne(3000, $false)
   if ($ok -and $tcp.Connected) {
-    Write-Report "OK — TCP connect to ${printerIp}:9100 succeeded"
+    Write-Report "OK - TCP connect to ${printerIp}:9100 succeeded"
     $tcp.Close()
   } else {
-    Write-Report "FAIL — TCP connect to ${printerIp}:9100 timed out (printer offline or wrong IP)"
+    Write-Report "FAIL - TCP connect to ${printerIp}:9100 timed out (printer offline or wrong IP)"
   }
 } catch {
-  Write-Report "FAIL — $($_.Exception.Message)"
+  Write-Report "FAIL - $($_.Exception.Message)"
 }
 
 Section 'Test print via bridge'
@@ -131,7 +131,7 @@ Section "Server log tail ($ServerLog)"
 if (Test-Path $ServerLog) {
   Get-Content $ServerLog -Tail 40 | ForEach-Object { Write-Report $_ }
 } else {
-  Write-Report "MISSING — bridge node never wrote server log (node not started or wrong path)"
+  Write-Report "MISSING - bridge node never wrote server log (node not started or wrong path)"
 }
 
 Section "Wrapper log tail ($WrapperLog)"
@@ -143,10 +143,10 @@ if (Test-Path $WrapperLog) {
 
 Section 'Chrome extension checklist (manual)'
 Write-Report @'
-1. chrome://extensions → BP RX Sticker v0.4.1+ → Reload
-2. Options → Mock print OFF, Printer IP = 172.18.129.123, Save
-3. Options → Check bridge → should say OK
-4. Service worker → Inspect → reproduce scan → copy [BP-RX Sticker BG] lines
+1. chrome://extensions -> BP RX Sticker v0.4.1+ -> Reload
+2. Options -> Mock print OFF, Printer IP = 172.18.129.123, Save
+3. Options -> Check bridge -> should say OK
+4. Service worker -> Inspect -> reproduce scan -> copy [BP-RX Sticker BG] lines
 '@
 
 Section 'Done'

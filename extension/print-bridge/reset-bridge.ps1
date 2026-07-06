@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Continue'
 $BridgeDir = $PSScriptRoot
 $BridgePort = 9101
 
-Write-Host 'BP RX — reset print bridge' -ForegroundColor Cyan
+Write-Host 'BP RX - reset print bridge' -ForegroundColor Cyan
 
 # Load port from config if present
 $config = Join-Path $BridgeDir 'config.local.env'
