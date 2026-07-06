@@ -80,8 +80,8 @@ try {
   }
   if (-not $health.bridgeVersion) {
     Write-Report 'WARN: bridgeVersion missing — old server.js. git pull then reset-bridge.ps1'
-  } elseif ($health.bridgeVersion -ne '0.4.2') {
-    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.2 — git pull then reset-bridge.ps1"
+  } elseif ($health.bridgeVersion -ne '0.4.3') {
+    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.3 — git pull then reset-bridge.ps1"
   }
   $printerIp = $health.printerIp
 } catch {
@@ -110,11 +110,17 @@ try {
 }
 
 Section 'Test print via bridge'
-$sampleZpl = "^XA`n^PW203`n^LL203`n^FO10,20^A0N,24,24^FDDIAG TEST^FS`n^XZ"
+$sampleZpl = @'
+^XA
+^PW203
+^LL203
+^FO10,20^A0N,24,24^FDDIAG TEST^FS
+^XZ
+'@
 try {
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $result = Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:9101/print' `
-    -Body $sampleZpl -ContentType 'text/plain' -TimeoutSec 30
+    -Body $sampleZpl -ContentType 'text/plain' -TimeoutSec 60
   $sw.Stop()
   Write-Report "OK in $($sw.ElapsedMilliseconds)ms: $($result | ConvertTo-Json -Compress)"
 } catch {

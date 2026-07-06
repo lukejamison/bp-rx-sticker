@@ -8,7 +8,7 @@ const http = require('http');
 const net = require('net');
 const path = require('path');
 
-const BRIDGE_VERSION = '0.4.2';
+const BRIDGE_VERSION = '0.4.3';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
@@ -32,12 +32,8 @@ const LOG_PATH = path.join(LOG_DIR, `server-${new Date().toISOString().slice(0, 
 
 function log(level, message, meta) {
   const line = `[${new Date().toISOString()}] [${level}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}`;
-  try {
-    fs.appendFileSync(LOG_PATH, `${line}\n`);
-  } catch {
-    /* ignore */
-  }
   console.log(line);
+  fs.appendFile(LOG_PATH, `${line}\n`, () => {});
   try {
     if (process.stdout._handle?.setBlocking) {
       process.stdout._handle.setBlocking(true);
@@ -45,6 +41,28 @@ function log(level, message, meta) {
   } catch {
     /* ignore */
   }
+}
+
+function respondJson(req, res, statusCode, body) {
+  if (req.aborted || res.writableEnded) {
+    return false;
+  }
+  try {
+    res.writeHead(statusCode, { ...corsHeaders(), 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+    return true;
+  } catch (err) {
+    log('WARN', 'response failed (client gone?)', { error: err.message });
+    return false;
+  }
+}
+
+function watchClientDisconnect(req, meta) {
+  const onClose = () => {
+    log('WARN', 'client disconnected during print', meta);
+  };
+  req.once('aborted', onClose);
+  req.once('close', onClose);
 }
 
 function resolvePrinterIp(headerIp) {
@@ -188,6 +206,7 @@ function sendZplToPrinter(printerIp, zpl, meta) {
 
     client = net.createConnection({ host: printerIp, port: PRINTER_PORT }, () => {
       clearTimeout(connectTimer);
+      client.setNoDelay(true);
       log('INFO', 'printer connected', meta);
 
       writeTimer = setTimeout(() => {
@@ -272,16 +291,17 @@ async function handleRequest(req, res) {
 
   const printerIp = resolvePrinterIp(req.headers['x-printer-ip']);
   const requestId = nextRequestId++;
+  const startedAt = Date.now();
 
   log('INFO', 'incoming POST /print', { requestId, printerIp, pid: process.pid });
+  watchClientDisconnect(req, { requestId });
 
   try {
     requestTimer.arm(HTTP_BODY_MS, 'read-body');
     const zpl = await readBody(req);
     if (!zpl.trim()) {
       requestTimer.clear();
-      res.writeHead(400, { ...corsHeaders(), 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'Empty ZPL body' }));
+      respondJson(req, res, 400, { ok: false, error: 'Empty ZPL body' });
       return;
     }
 
@@ -300,15 +320,24 @@ async function handleRequest(req, res) {
     await enqueuePrint(() => sendAllLabels(printerIp, zpl, meta), meta);
 
     requestTimer.clear();
-    log('INFO', 'print ok', meta);
-    res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length, labels: labels.length, requestId }));
+    const elapsedMs = Date.now() - startedAt;
+    log('INFO', 'print ok', { ...meta, elapsedMs });
+
+    if (!respondJson(req, res, 200, {
+      ok: true,
+      printerIp,
+      bytes: zpl.length,
+      labels: labels.length,
+      requestId,
+      elapsedMs,
+    })) {
+      log('WARN', 'print delivered but HTTP client already gone', { ...meta, elapsedMs });
+    }
   } catch (err) {
     requestTimer.clear();
-    log('ERROR', 'print failed', { requestId, printerIp, error: err.message });
+    log('ERROR', 'print failed', { requestId, printerIp, error: err.message, elapsedMs: Date.now() - startedAt });
     if (!res.headersSent) {
-      res.writeHead(500, { ...corsHeaders(), 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: err.message, printerIp, requestId }));
+      respondJson(req, res, 500, { ok: false, error: err.message, printerIp, requestId });
     }
   }
 }

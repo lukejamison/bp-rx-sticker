@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BP RX Sticker — OneScan Bridge",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "On SSCC Scan In only: one barcode scan prints one invoice label.",
   "options_page": "options/options.html",
   "permissions": ["storage", "tabs"],
