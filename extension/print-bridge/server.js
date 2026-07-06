@@ -8,7 +8,7 @@ const http = require('http');
 const net = require('net');
 const path = require('path');
 
-const BRIDGE_VERSION = '0.4.4';
+const BRIDGE_VERSION = '0.4.5';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
@@ -35,16 +35,28 @@ try {
 
 const LOG_PATH = path.join(LOG_DIR, `server-${new Date().toISOString().slice(0, 10)}.log`);
 
+// If the console reading our stdout goes away (closed terminal, scheduled task
+// with no attached console, etc.), console.log() throws EPIPE. That used to feed
+// into uncaughtException -> log() -> console.log() -> EPIPE again, forever — a
+// synchronous crash loop that pegged the event loop and made the bridge totally
+// unresponsive (looked "down" from the outside) without the process ever exiting.
+// Once stdout breaks, stop touching it for the rest of the process's life and
+// keep logging to the file only.
+let stdoutBroken = false;
+process.stdout.on('error', (err) => {
+  if (err && err.code === 'EPIPE') {
+    stdoutBroken = true;
+  }
+});
+
 function log(level, message, meta) {
   const line = `[${new Date().toISOString()}] [${level}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}`;
-  console.log(line);
   fs.appendFile(LOG_PATH, `${line}\n`, () => {});
+  if (stdoutBroken) return;
   try {
-    if (process.stdout._handle?.setBlocking) {
-      process.stdout._handle.setBlocking(true);
-    }
+    console.log(line);
   } catch {
-    /* ignore */
+    stdoutBroken = true;
   }
 }
 
