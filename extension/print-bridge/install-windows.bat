@@ -7,6 +7,7 @@ REM
 REM Usage:
 REM   install-windows.bat
 REM   install-windows.bat 172.18.129.200
+REM   install-windows.bat placeholder
 REM   install-windows.bat uninstall
 
 cd /d "%~dp0"
@@ -23,8 +24,13 @@ if /I "%~1"=="uninstall" (
 )
 
 if not "%~1"=="" (
-  echo Mode: install with printer IP %~1
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1" -PrinterIp "%~1"
+  if /I "%~1"=="placeholder" (
+    echo Mode: install with default placeholder printer IP
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"
+  ) else (
+    echo Mode: install with printer IP %~1
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1" -PrinterIp "%~1"
+  )
 ) else (
   echo Mode: install ^(interactive prompts for printer IP^)
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1"

@@ -84,8 +84,8 @@ $printerPort = if ($env:PRINTER_PORT) { $env:PRINTER_PORT } else { '9100' }
 $bridgeHost = if ($env:PRINT_BRIDGE_HOST) { $env:PRINT_BRIDGE_HOST } else { '127.0.0.1' }
 $bridgePort = if ($env:PRINT_BRIDGE_PORT) { $env:PRINT_BRIDGE_PORT } else { '9101' }
 
-Write-BridgeLog "Target printer: ${printerIp}:${printerPort}"
-Write-BridgeLog "Bridge listen: http://${bridgeHost}:${bridgePort}"
+Write-BridgeLog "Target printer: $($printerIp):$($printerPort)"
+Write-BridgeLog "Bridge listen: http://$($bridgeHost):$($bridgePort)"
 
 Set-Location $BridgeDir
 

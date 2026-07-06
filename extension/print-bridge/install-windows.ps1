@@ -136,6 +136,7 @@ if (-not $PrinterIp) {
 Write-Host ''
 Write-Host 'BP RX Print Bridge — printer configuration'
 Write-Host 'Press Enter to keep the value in [brackets].'
+Write-Host 'No printer yet? Keep the default IP for now — edit config.local.env later.'
 Write-Host ''
 
 $promptIp = Read-Host "Zebra printer IP [$PrinterIp]"
@@ -175,12 +176,14 @@ $Settings = New-ScheduledTaskSettingsSet `
   -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit ([TimeSpan]::Zero)
 
+$taskDescription = 'BP RX Sticker print bridge ({0}:{1} -> {2}:{3})' -f $BridgeHost, $BridgePort, $PrinterIp, $PrinterPort
+
 Register-ScheduledTask `
   -TaskName $TaskName `
   -Action $Action `
   -Trigger $Trigger `
   -Settings $Settings `
-  -Description "BP RX Sticker print bridge (${BridgeHost}:${BridgePort} -> ${PrinterIp}:${PrinterPort})" `
+  -Description $taskDescription `
   -Force | Out-Null
 
 Write-InstallLog "Scheduled task registered: $TaskName"
@@ -199,7 +202,7 @@ Write-InstallLog "Task last run: $($taskInfo.LastRunTime)"
 Write-InstallLog "Task last result: $($taskInfo.LastTaskResult)"
 Write-InstallLog "Task state: $((Get-ScheduledTask -TaskName $TaskName).State)"
 
-$healthUrl = "http://${BridgeHost}:${BridgePort}/health"
+$healthUrl = "http://$($BridgeHost):$($BridgePort)/health"
 Write-InstallLog "Probing health endpoint: $healthUrl"
 try {
   $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5
@@ -211,8 +214,8 @@ try {
 
 Write-Host ''
 Write-Host 'Installed and started BP-RX-PrintBridge'
-Write-Host "Printer:  ${PrinterIp}:${PrinterPort}"
-Write-Host "Bridge:   http://${BridgeHost}:${BridgePort}/health"
+Write-Host "Printer:  $($PrinterIp):$($PrinterPort)"
+Write-Host "Bridge:   http://$($BridgeHost):$($BridgePort)/health"
 Write-Host "Config:   $ConfigPath"
 Write-Host "Logs:     $LogDir"
 Write-Host "Install log: $InstallLog"
