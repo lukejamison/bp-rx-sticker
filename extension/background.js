@@ -166,11 +166,17 @@ async function processScan(raw, meta = {}) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'PRINT_ZPL') {
+    const labelCount = message.labelCount || 1;
+    const printStart = Date.now();
+    log('PRINT_ZPL start', { labelCount, bytes: message.zpl?.length || 0 });
     getPrintSettings()
       .then((settings) => printZplViaBridge(message.zpl, settings))
-      .then((data) => sendResponse({ ok: true, ...data }))
+      .then((data) => {
+        log('PRINT_ZPL ok', { ms: Date.now() - printStart, ...data });
+        sendResponse({ ok: true, ...data });
+      })
       .catch((err) => {
-        warn('Print failed', err.message);
+        warn('PRINT_ZPL failed', err.message, { ms: Date.now() - printStart });
         sendResponse({
           ok: false,
           error: `${err.message}. Start: node extension/print-bridge/server.js`,
@@ -210,7 +216,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const zpl = buildLabelZpl(lastResult, printSettings, labelCount);
         if (!zpl) throw new Error('Could not build label from last scan');
 
+        log('REPRINT_LAST start', { labelCount, bytes: zpl.length });
+        const printStart = Date.now();
         const data = await printZplViaBridge(zpl, printSettings);
+        log('REPRINT_LAST ok', { ms: Date.now() - printStart, ...data });
         sendResponse({
           ok: true,
           ...data,
@@ -218,7 +227,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           labelCount,
         });
       })
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .catch((err) => {
+        warn('REPRINT_LAST failed', err.message);
+        sendResponse({ ok: false, error: err.message });
+      });
     return true;
   }
 

@@ -114,6 +114,14 @@ async function checkBridge(showOk = true) {
   try {
     const result = await chrome.runtime.sendMessage({ type: 'BRIDGE_HEALTH' });
     if (result?.ok) {
+      const configuredIp = printerIpInput.value.trim();
+      const bridgeIp = result.printerIp || '';
+      if (bridgeIp && configuredIp && bridgeIp !== configuredIp) {
+        printerIpInput.value = bridgeIp;
+        await chrome.storage.sync.set({ printerIp: bridgeIp });
+        bridgeStatus.textContent = `Printer IP synced to bridge: ${bridgeIp} (was ${configuredIp})`;
+        return result;
+      }
       bridgeStatus.textContent = showOk
         ? `Print bridge OK → ${result.printerIp || 'printer'}:${result.printerPort || 9100}`
         : '';

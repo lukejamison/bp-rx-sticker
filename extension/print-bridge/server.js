@@ -3,8 +3,10 @@
  * Local print bridge: HTTP POST ZPL -> Zebra raw TCP :9100
  */
 
+const fs = require('fs');
 const http = require('http');
 const net = require('net');
+const path = require('path');
 
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
@@ -12,17 +14,38 @@ const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
-const PRINTER_DRAIN_MS = 500;
-const PRINTER_SOCKET_KILL_MS = 2500;
+const PRINTER_DRAIN_MS = 400;
+const PRINTER_SOCKET_KILL_MS = 2000;
+const INTER_LABEL_MS = 350;
 const HTTP_BODY_MS = 30000;
-const HTTP_PRINT_BASE_MS = 90000;
+const HTTP_PRINT_BASE_MS = 120000;
+const LOG_DIR = path.join(__dirname, 'logs');
 
 let nextRequestId = 1;
 
+try {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+} catch {
+  /* ignore */
+}
+
+const LOG_PATH = path.join(LOG_DIR, `server-${new Date().toISOString().slice(0, 10)}.log`);
+
 function log(level, message, meta) {
-  const ts = new Date().toISOString();
-  const suffix = meta ? ` ${JSON.stringify(meta)}` : '';
-  console.log(`[${ts}] [${level}] ${message}${suffix}`);
+  const line = `[${new Date().toISOString()}] [${level}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}`;
+  try {
+    fs.appendFileSync(LOG_PATH, `${line}\n`);
+  } catch {
+    /* ignore */
+  }
+  console.log(line);
+  try {
+    if (process.stdout._handle?.setBlocking) {
+      process.stdout._handle.setBlocking(true);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function corsHeaders() {
@@ -61,16 +84,33 @@ function createRequestTimer(req, res) {
   return { arm, clear };
 }
 
-function httpTimeoutForZpl(zpl) {
+function httpTimeoutForZpl(zpl, labelCount) {
   const bytes = Buffer.byteLength(zpl, 'utf8');
-  return Math.min(180000, HTTP_PRINT_BASE_MS + Math.ceil(bytes / 50));
+  const perLabel = 15000;
+  return Math.min(300000, HTTP_PRINT_BASE_MS + Math.ceil(bytes / 40) + labelCount * perLabel);
 }
 
 function printTimeoutsForZpl(zpl) {
   const bytes = Buffer.byteLength(zpl, 'utf8');
   return {
-    writeMs: Math.min(90000, PRINTER_WRITE_MS + Math.ceil(bytes / 150)),
+    writeMs: Math.min(60000, PRINTER_WRITE_MS + Math.ceil(bytes / 100)),
+    jobMs: Math.min(90000, PRINTER_CONNECT_MS + PRINTER_WRITE_MS + Math.ceil(bytes / 80) + PRINTER_SOCKET_KILL_MS + 5000),
   };
+}
+
+function splitZplLabels(zpl) {
+  const labels = [];
+  const re = /\^XA[\s\S]*?\^XZ/g;
+  let match = re.exec(zpl);
+  while (match) {
+    labels.push(match[0]);
+    match = re.exec(zpl);
+  }
+  return labels.length ? labels : [zpl];
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** One printer job at a time — Zebra raw TCP misbehaves with overlapping connections. */
@@ -85,7 +125,7 @@ function enqueuePrint(task, meta) {
   const run = printChain
     .then(async () => {
       const waitMs = Date.now() - queuedAt;
-      if (waitMs > 500) {
+      if (waitMs > 300) {
         log('INFO', 'print dequeue', { ...meta, waitMs, queueDepth });
       }
       return task();
@@ -94,12 +134,15 @@ function enqueuePrint(task, meta) {
       queueDepth = Math.max(0, queueDepth - 1);
     });
 
-  printChain = run.catch(() => {});
+  // Never let a rejected job block the queue.
+  printChain = run.catch((err) => {
+    log('ERROR', 'queue job failed (continuing)', { ...meta, error: err.message });
+  });
   return run;
 }
 
 function sendZplToPrinter(printerIp, zpl, meta) {
-  const { writeMs } = printTimeoutsForZpl(zpl);
+  const { writeMs, jobMs } = printTimeoutsForZpl(zpl);
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -107,11 +150,13 @@ function sendZplToPrinter(printerIp, zpl, meta) {
     let connectTimer = null;
     let writeTimer = null;
     let killTimer = null;
+    let jobTimer = null;
 
     const cleanup = () => {
       clearTimeout(connectTimer);
       clearTimeout(writeTimer);
       clearTimeout(killTimer);
+      clearTimeout(jobTimer);
     };
 
     const done = (err) => {
@@ -127,12 +172,19 @@ function sendZplToPrinter(printerIp, zpl, meta) {
       else resolve();
     };
 
+    jobTimer = setTimeout(() => {
+      log('ERROR', 'print job hard timeout', meta);
+      done(new Error('Print job timed out'));
+    }, jobMs);
+
     connectTimer = setTimeout(() => {
       done(new Error('Printer connection timed out'));
     }, PRINTER_CONNECT_MS);
 
     client = net.createConnection({ host: printerIp, port: PRINTER_PORT }, () => {
       clearTimeout(connectTimer);
+      log('INFO', 'printer connected', meta);
+
       writeTimer = setTimeout(() => {
         done(new Error('Printer write timed out'));
       }, writeMs);
@@ -144,7 +196,9 @@ function sendZplToPrinter(printerIp, zpl, meta) {
           return;
         }
 
-        // Do not wait on client.end() — Zebra often never ACKs close, which blocks the next job.
+        log('INFO', 'printer write ok', meta);
+
+        // Do not wait on client.end() — Zebra often never ACKs close.
         killTimer = setTimeout(() => done(), PRINTER_DRAIN_MS);
         try {
           client.end();
@@ -152,7 +206,7 @@ function sendZplToPrinter(printerIp, zpl, meta) {
           /* ignore */
         }
         setTimeout(() => {
-          if (!settled && client) {
+          if (!settled) {
             log('WARN', 'forcing printer socket close', meta);
             done();
           }
@@ -160,8 +214,25 @@ function sendZplToPrinter(printerIp, zpl, meta) {
       });
     });
 
-    client.on('error', (err) => done(err));
+    client.on('error', (err) => {
+      log('ERROR', 'printer socket error', { ...meta, error: err.message });
+      done(err);
+    });
   });
+}
+
+async function sendAllLabels(printerIp, zpl, meta) {
+  const labels = splitZplLabels(zpl);
+  log('INFO', 'sending labels', { ...meta, labelTotal: labels.length });
+
+  for (let i = 0; i < labels.length; i++) {
+    if (i > 0) {
+      await delay(INTER_LABEL_MS);
+    }
+    const labelMeta = { ...meta, labelIndex: i + 1, labelTotal: labels.length, bytes: labels[i].length };
+    await sendZplToPrinter(printerIp, labels[i], labelMeta);
+    log('INFO', 'label sent', labelMeta);
+  }
 }
 
 function readBody(req) {
@@ -194,6 +265,7 @@ async function handleRequest(req, res) {
       printerPort: PRINTER_PORT,
       pid: process.pid,
       queueDepth,
+      logFile: LOG_PATH,
     }));
     return;
   }
@@ -217,18 +289,24 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const labelCount = (zpl.match(/\^XZ/g) || []).length || 1;
-    const meta = { requestId, printerIp, bytes: zpl.length, labels: labelCount, pid: process.pid };
+    const labels = splitZplLabels(zpl);
+    const meta = {
+      requestId,
+      printerIp,
+      bytes: zpl.length,
+      labels: labels.length,
+      pid: process.pid,
+    };
 
-    requestTimer.arm(httpTimeoutForZpl(zpl), 'print-job');
+    requestTimer.arm(httpTimeoutForZpl(zpl, labels.length), 'print-job');
     log('INFO', 'print request', meta);
 
-    await enqueuePrint(() => sendZplToPrinter(printerIp, zpl, meta), meta);
+    await enqueuePrint(() => sendAllLabels(printerIp, zpl, meta), meta);
 
     requestTimer.clear();
     log('INFO', 'print ok', meta);
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length, labels: labelCount, requestId }));
+    res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length, labels: labels.length, requestId }));
   } catch (err) {
     requestTimer.clear();
     log('ERROR', 'print failed', { requestId, printerIp, error: err.message });
@@ -250,6 +328,7 @@ function tryListen() {
       bridge: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
       printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
       pid: process.pid,
+      logFile: LOG_PATH,
     });
   });
 }
