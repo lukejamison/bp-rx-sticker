@@ -58,14 +58,17 @@ function Write-BridgeConfig {
     [string]$Ip,
     [int]$Port,
     [string]$ListenHost,
-    [int]$BridgeListenPort
+    [int]$BridgeListenPort,
+    [string]$NodeExe
   )
 
+  $updated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   $content = @(
-    '# BP RX Print Bridge — local config (machine-specific)'
-    "# Updated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    "# Re-run install-windows.ps1 after editing, or restart the scheduled task."
+    '# BP RX Print Bridge - local config (machine-specific)'
+    "# Updated: $updated"
+    '# Re-run install-windows.ps1 after editing, or restart the scheduled task.'
     ''
+    "NODE_EXE=$NodeExe"
     "PRINTER_IP=$Ip"
     "PRINTER_PORT=$Port"
     "PRINT_BRIDGE_HOST=$ListenHost"
@@ -75,6 +78,7 @@ function Write-BridgeConfig {
 
   Set-Content -Path $ConfigPath -Value $content -Encoding UTF8
   Write-InstallLog "Wrote config: $ConfigPath"
+  Write-InstallLog "  NODE_EXE=$NodeExe"
   Write-InstallLog "  PRINTER_IP=$Ip"
   Write-InstallLog "  PRINTER_PORT=$Port"
   Write-InstallLog "  PRINT_BRIDGE_HOST=$ListenHost"
@@ -99,7 +103,7 @@ Write-InstallLog "Computer: $env:COMPUTERNAME"
 
 if (-not (Test-Admin)) {
   Write-InstallLog 'Not running as Administrator. Scheduled task install may fail.' 'WARN'
-  Write-InstallLog 'Right-click install-windows.bat → Run as administrator.' 'WARN'
+  Write-InstallLog 'Right-click install-windows.bat and choose Run as administrator.' 'WARN'
 }
 
 if ($Uninstall) {
@@ -134,9 +138,9 @@ if (-not $PrinterIp) {
 }
 
 Write-Host ''
-Write-Host 'BP RX Print Bridge — printer configuration'
+Write-Host 'BP RX Print Bridge - printer configuration'
 Write-Host 'Press Enter to keep the value in [brackets].'
-Write-Host 'No printer yet? Keep the default IP for now — edit config.local.env later.'
+Write-Host 'No printer yet? Keep the default IP and edit config.local.env later.'
 Write-Host ''
 
 $promptIp = Read-Host "Zebra printer IP [$PrinterIp]"
@@ -155,7 +159,7 @@ $promptBridgeHost = Read-Host "Bridge listen host [$existingBridgeHost]"
 if ($promptBridgeHost) { $BridgeHost = $promptBridgeHost.Trim() } else { $BridgeHost = $existingBridgeHost }
 
 Write-InstallLog '--- Configuration summary ---'
-Write-BridgeConfig -Ip $PrinterIp -Port $PrinterPort -ListenHost $BridgeHost -BridgeListenPort $BridgePort
+Write-BridgeConfig -Ip $PrinterIp -Port $PrinterPort -ListenHost $BridgeHost -BridgeListenPort $BridgePort -NodeExe $nodeExe
 
 $psExe = (Get-Command powershell -ErrorAction Stop).Source
 $taskArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$StartScript`""
@@ -172,11 +176,13 @@ $Settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
   -StartWhenAvailable `
-  -RestartCount 3 `
+  -RestartCount 999 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-$taskDescription = 'BP RX Sticker print bridge ({0}:{1} -> {2}:{3})' -f $BridgeHost, $BridgePort, $PrinterIp, $PrinterPort
+$bridgeEndpoint = $BridgeHost + ':' + $BridgePort
+$printerEndpoint = $PrinterIp + ':' + $PrinterPort
+$taskDescription = 'BP RX Sticker print bridge (' + $bridgeEndpoint + ' to ' + $printerEndpoint + ')'
 
 Register-ScheduledTask `
   -TaskName $TaskName `
@@ -202,7 +208,7 @@ Write-InstallLog "Task last run: $($taskInfo.LastRunTime)"
 Write-InstallLog "Task last result: $($taskInfo.LastTaskResult)"
 Write-InstallLog "Task state: $((Get-ScheduledTask -TaskName $TaskName).State)"
 
-$healthUrl = "http://$($BridgeHost):$($BridgePort)/health"
+$healthUrl = 'http://' + $BridgeHost + ':' + $BridgePort + '/health'
 Write-InstallLog "Probing health endpoint: $healthUrl"
 try {
   $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5
@@ -214,16 +220,16 @@ try {
 
 Write-Host ''
 Write-Host 'Installed and started BP-RX-PrintBridge'
-Write-Host "Printer:  $($PrinterIp):$($PrinterPort)"
-Write-Host "Bridge:   http://$($BridgeHost):$($BridgePort)/health"
+Write-Host ('Printer:  ' + $printerEndpoint)
+Write-Host ('Bridge:   http://' + $bridgeEndpoint + '/health')
 Write-Host "Config:   $ConfigPath"
 Write-Host "Logs:     $LogDir"
 Write-Host "Install log: $InstallLog"
 Write-Host ''
 Write-Host 'To change printer IP later: edit config.local.env and re-run this installer,'
-Write-Host 'or run:  powershell -ExecutionPolicy Bypass -File install-windows.ps1 -PrinterIp <new-ip>'
+Write-Host 'or run install-windows.bat with the new printer IP as the argument.'
 Write-Host ''
-Write-Host 'Uninstall:  install-windows.ps1 -Uninstall'
+Write-Host 'Uninstall:  install-windows.bat uninstall'
 Write-Host ''
 
 Write-InstallLog '========== Install complete =========='

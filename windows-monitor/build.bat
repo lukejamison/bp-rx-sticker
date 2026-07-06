@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo.
-echo BP RX Bridge Monitor — build
+echo BP RX Bridge Monitor - build
 echo Requires .NET 8 SDK: https://dotnet.microsoft.com/download
 echo.
 

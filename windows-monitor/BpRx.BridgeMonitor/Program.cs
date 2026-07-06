@@ -19,9 +19,6 @@ internal static class Program
             return;
         }
 
-        _coordinator.Logs.WriteMonitorLog("INFO",
-            $"BP RX Bridge Monitor starting — {AdminHelper.ElevationLabel}");
-
         Application.Run(new TrayAppContext());
     }
 }

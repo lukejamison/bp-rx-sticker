@@ -6,7 +6,7 @@
 #   ./send-test-label.sh 172.18.129.132
 #   ./send-test-label.sh 172.18.129.132 /path/to/label.zpl
 #
-# Label media: PW 203, LL 102 (1" x 0.5" at 203 dpi)
+# Label media: PW 203, LL 203 (1" x 1" at 203 dpi)
 # Default file: sample-price-sticker.zpl
 # If top is cut off, try: sample-price-sticker-offset20.zpl (more top margin)
 

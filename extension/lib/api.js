@@ -1,8 +1,9 @@
 const DEFAULT_API_URL = 'http://172.18.129.154:3000';
-const DEFAULT_HOURS = 24;
-const WEEKEND_HOURS = 72;
+/** 7 days — receiving backlog often spans the week (not just same-day invoices). */
+const DEFAULT_HOURS = 168;
+const WEEKEND_HOURS = 168;
 
-/** Sun/Mon: widen window so Fri/Sat invoices still match (e.g. Monday receiving). */
+/** Sun/Mon: ensure at least a full week for Fri–Mon receiving gaps. */
 function getEffectiveHours(configuredHours) {
   const day = new Date().getDay();
   const base = configuredHours ?? DEFAULT_HOURS;
@@ -12,6 +13,37 @@ function getEffectiveHours(configuredHours) {
   return base;
 }
 
+function ndcLookupVariants(code) {
+  const digits = String(code ?? '').replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 11) return [];
+
+  const variants = new Set();
+  variants.add(digits.padStart(11, '0'));
+  variants.add(digits);
+  const unpadded = digits.replace(/^0+/, '');
+  if (unpadded) variants.add(unpadded);
+  return [...variants];
+}
+
+function expandLookupCodes(codes) {
+  const ordered = [];
+  const seen = new Set();
+
+  const add = (code) => {
+    const value = String(code ?? '').trim();
+    if (!value || value.length < 8 || seen.has(value)) return;
+    seen.add(value);
+    ordered.push(value);
+  };
+
+  for (const code of codes) {
+    add(code);
+    ndcLookupVariants(code).forEach(add);
+  }
+
+  return ordered;
+}
+
 async function getSettings() {
   const stored = await chrome.storage.sync.get({
     apiUrl: DEFAULT_API_URL,
@@ -19,6 +51,10 @@ async function getSettings() {
     mockPrint: true,
     enabled: true,
   });
+  if (stored.hours === 24) {
+    stored.hours = DEFAULT_HOURS;
+    await chrome.storage.sync.set({ hours: DEFAULT_HOURS });
+  }
   return {
     ...stored,
     configuredHours: stored.hours,
@@ -49,7 +85,7 @@ async function lookupWithCandidates(codes, settings) {
   const tried = [];
   let lastError = null;
 
-  for (const code of codes) {
+  for (const code of expandLookupCodes(codes)) {
     if (!code || tried.includes(code)) continue;
     tried.push(code);
 
@@ -71,6 +107,7 @@ if (typeof self !== 'undefined') {
   self.DEFAULT_API_URL = DEFAULT_API_URL;
   self.WEEKEND_HOURS = WEEKEND_HOURS;
   self.getEffectiveHours = getEffectiveHours;
+  self.expandLookupCodes = expandLookupCodes;
   self.getSettings = getSettings;
   self.lookupBarcode = lookupBarcode;
   self.lookupWithCandidates = lookupWithCandidates;

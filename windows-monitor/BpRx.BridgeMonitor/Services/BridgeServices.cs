@@ -127,6 +127,11 @@ public sealed class TaskSupervisorService
 
         var script =
             $"$name = '{EscapePs(taskName)}'; " +
+            "Write-Output 'Stopping stale bridge processes...'; " +
+            "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" -ErrorAction SilentlyContinue | " +
+            "Where-Object { $_.CommandLine -match 'print-bridge' -and $_.CommandLine -match 'server\\.js' } | " +
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; " +
+            "Start-Sleep -Seconds 1; " +
             "Write-Output 'Stopping scheduled task...'; " +
             "Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue; " +
             "Start-Sleep -Seconds 2; " +
@@ -157,6 +162,9 @@ public sealed class TaskSupervisorService
         }
 
         var script =
+            "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" -ErrorAction SilentlyContinue | " +
+            "Where-Object { $_.CommandLine -match 'print-bridge' -and $_.CommandLine -match 'server\\.js' } | " +
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; " +
             $"Stop-ScheduledTask -TaskName '{EscapePs(taskName)}' -ErrorAction Stop; " +
             "'Stopped'";
 

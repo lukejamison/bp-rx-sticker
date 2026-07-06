@@ -16,7 +16,7 @@
 
 app.get('/api/search/:query/recent', async (req, res) => {
     const { query } = req.params;
-    const { hours = 24 } = req.query;
+    const { hours = 168 } = req.query;
     
     console.log('🔍 Universal search:', { query, hours });
     
@@ -45,7 +45,10 @@ app.get('/api/search/:query/recent', async (req, res) => {
                     "TotalItems"
                 FROM "prx-invoices"
                 WHERE "InvoiceNumber" ILIKE $1
-                    AND "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+                    AND (
+                        "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+                        OR "InvoiceDate" >= NOW() - INTERVAL '1 hour' * $2
+                    )
                 ORDER BY "StatusChangedOn" DESC
                 LIMIT 1
             `;
@@ -127,7 +130,10 @@ app.get('/api/search/:query/recent', async (req, res) => {
                     "TotalItems"
                 FROM "prx-invoices"
                 WHERE "ItemDetails"::text LIKE $1
-                    AND "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+                    AND (
+                        "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+                        OR "InvoiceDate" >= NOW() - INTERVAL '1 hour' * $2
+                    )
                 ORDER BY "StatusChangedOn" DESC
             `;
             

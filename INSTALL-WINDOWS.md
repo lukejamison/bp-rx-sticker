@@ -106,7 +106,8 @@ Double-click the tray icon → confirm **Running as Administrator** and paths to
 | Bridge down | Task Scheduler → run `BP-RX-PrintBridge`, or tray → **Restart print bridge** |
 | Monitor won't restart bridge | Re-launch monitor as Admin; run `install-monitor.bat` again |
 | No label, lookup works | Mock print still ON? Printer IP wrong? |
-| Not on recent invoice | Invoice must be in last 24h (72h Sun/Mon) |
+| Not on recent invoice | Check lookup window (default **168h** / 7 days). Test API with `?hours=168` |
+| Duplicate repo / bridge dies after prints | Run `extension\print-bridge\cleanup-windows.bat` (report), then `cleanup-windows.bat apply` |
 
 **Logs:**
 
@@ -125,3 +126,16 @@ install-monitor.bat uninstall
 ```
 
 Remove extension in `chrome://extensions`.
+
+---
+
+## Workstation cleanup (DELIVERY01)
+
+Find duplicate `bp-rx-sticker` folders and orphan bridge processes:
+
+```bat
+extension\print-bridge\cleanup-windows.bat
+extension\print-bridge\cleanup-windows.bat apply
+```
+
+Report-only by default. `apply` stops extra `node.exe` bridge PIDs — then restart the bridge from the tray or `install-windows.bat`.

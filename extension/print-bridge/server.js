@@ -1,14 +1,6 @@
 #!/usr/bin/env node
 /**
- * Local print bridge: HTTP POST ZPL → Zebra raw TCP :9100
- *
- * Run on the same PC as Chrome (Windows OneScan workstation):
- *   node extension/print-bridge/server.js
- *
- * Env:
- *   PRINTER_IP=172.18.129.132
- *   PRINTER_PORT=9100
- *   PRINT_BRIDGE_PORT=9101
+ * Local print bridge: HTTP POST ZPL -> Zebra raw TCP :9100
  */
 
 const http = require('http');
@@ -18,12 +10,6 @@ const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
-
-function log(level, message, extra) {
-  const ts = new Date().toISOString();
-  const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
-  console.log(`[${ts}] [${level}] ${message}${suffix}`);
-}
 
 function log(level, message, meta) {
   const ts = new Date().toISOString();
@@ -41,16 +27,34 @@ function corsHeaders() {
 
 function sendZplToPrinter(printerIp, zpl) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+
     const client = net.createConnection({ host: printerIp, port: PRINTER_PORT }, () => {
-      client.write(zpl, 'utf8', () => client.end());
+      client.write(zpl, 'utf8', (writeErr) => {
+        if (writeErr) {
+          client.destroy();
+          done(writeErr);
+          return;
+        }
+        client.end(() => done());
+      });
     });
-    client.setTimeout(10000, () => {
-      client.destroy(new Error('Printer connection timed out'));
-    });
-    client.on('error', reject);
-    client.on('close', (hadError) => {
-      if (hadError) return;
-      resolve();
+
+    const timer = setTimeout(() => {
+      client.destroy();
+      done(new Error('Printer connection timed out'));
+    }, 10000);
+
+    client.on('error', (err) => {
+      client.destroy();
+      done(err);
     });
   });
 }
@@ -72,7 +76,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/health') {
-    log('INFO', 'health check');
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, printerIp: DEFAULT_PRINTER_IP, printerPort: PRINTER_PORT }));
     return;
@@ -105,9 +108,41 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(BRIDGE_PORT, BRIDGE_HOST, () => {
-  log('INFO', 'listening', {
-    bridge: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
-    printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
+let listenRetries = 15;
+
+function tryListen() {
+  server.listen(BRIDGE_PORT, BRIDGE_HOST, () => {
+    log('INFO', 'listening', {
+      bridge: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
+      printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
+      pid: process.pid,
+    });
   });
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && listenRetries > 0) {
+    listenRetries -= 1;
+    log('WARN', 'port in use, retrying listen', { retriesLeft: listenRetries, port: BRIDGE_PORT });
+    setTimeout(() => {
+      server.close(() => tryListen());
+    }, 2000);
+    return;
+  }
+  log('ERROR', 'HTTP server error', {
+    error: err.message,
+    code: err.code,
+    hint: err.code === 'EADDRINUSE' ? 'stale bridge process may be holding the port' : undefined,
+  });
+  process.exit(err.code === 'EADDRINUSE' ? 2 : 1);
 });
+
+process.on('uncaughtException', (err) => {
+  log('ERROR', 'uncaughtException (bridge keeps running)', { error: err.message, stack: err.stack });
+});
+
+process.on('unhandledRejection', (reason) => {
+  log('ERROR', 'unhandledRejection', { error: String(reason) });
+});
+
+tryListen();

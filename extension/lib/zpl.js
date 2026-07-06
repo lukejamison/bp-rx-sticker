@@ -1,11 +1,10 @@
 (function (root) {
-  /** 203 dpi — 1" × 0.5" RX price sticker */
+  /** 203 dpi — 1" x 1" RX price sticker */
   const LABEL_DPI = 203;
-  const DEFAULT_PRINT_WIDTH = LABEL_DPI; // 1"
-  const DEFAULT_LABEL_LENGTH = Math.round(LABEL_DPI / 2); // 0.5" = 102 dots
+  const DEFAULT_PRINT_WIDTH = LABEL_DPI;
+  const DEFAULT_LABEL_LENGTH = LABEL_DPI;
 
-  /** Shift content down — avoids top edge / gap cutoff on small media */
-  const LABEL_HOME_Y = 14;
+  const LABEL_HOME_Y = 8;
   const MARGIN_X = 6;
 
   function escapeZpl(text) {
@@ -37,12 +36,25 @@
     return raw;
   }
 
+  /** 11-digit NDC for Data Matrix (no dashes). */
+  function ndcBarcodeDigits(ndc) {
+    const digits = String(ndc ?? '').replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 11) return '';
+    return digits.padStart(11, '0');
+  }
+
   function formatCodeLine(ndc, upc) {
     const ndcFmt = formatNdc(ndc);
     if (ndcFmt) return `NDC ${ndcFmt}`;
     const upcDigits = String(upc ?? '').replace(/\D/g, '');
     if (upcDigits) return `UPC ${upcDigits}`;
     return '';
+  }
+
+  function formatUpcLine(upc) {
+    const upcDigits = String(upc ?? '').replace(/\D/g, '');
+    if (!upcDigits) return '';
+    return `UPC ${upcDigits}`;
   }
 
   function formatDateShort(dateStr) {
@@ -55,8 +67,7 @@
   }
 
   /**
-   * 1" × 0.5" — name, NDC/UPC, cost, supplier, date received, lot (optional).
-   * Top-down layout with ^LH Y offset for small-label printers.
+   * 1" x 1" (203 x 203 dots) — name, NDC, large price, supplier, rcvd/lot.
    */
   function generateLabel(data) {
     const printWidth = data.printWidth || DEFAULT_PRINT_WIDTH;
@@ -64,21 +75,27 @@
     const homeY = data.labelHomeY ?? LABEL_HOME_Y;
     const contentWidth = printWidth - MARGIN_X * 2;
 
-    const name = abbrevText(data.itemName, 22);
-    const codeLine = abbrevText(formatCodeLine(data.ndc, data.upc), 24);
+    const name = abbrevText(data.itemName, 28);
     const price = formatPrice(data.cost);
-    const supplier = abbrevText(data.supplier, 14);
+    const supplier = abbrevText(data.supplier, 18);
     const received = formatDateShort(data.dateReceived);
     const lot = data.lot ? abbrevText(String(data.lot).trim(), 12) : '';
+    const ndcDigits = ndcBarcodeDigits(data.ndc);
+    const ndcFormatted = abbrevText(formatNdc(data.ndc), 14);
+    const upcLine = abbrevText(formatUpcLine(data.upc), 26);
 
-    // Fixed rows (dots from label home) — tuned for 102-dot label length
-    const yName = homeY;
-    const yCode = homeY + 12;
-    const yCost = homeY + 24;
-    const ySupplier = homeY + 44;
-    const yFooter = homeY + 56;
+    const fontName = 18;
+    const fontCode = 17;
+    const fontCodeLabel = 15;
+    const fontPrice = price.length <= 7 ? 38 : 32;
+    const fontMed = 20;
+    const fontSmall = 17;
+    const gap = 4;
+    const dmModule = 4;
+    const dmReserved = ndcDigits ? 62 : 0;
+    const textWidth = contentWidth - dmReserved;
 
-    const priceHeight = price.length <= 7 ? 18 : 15;
+    let y = homeY;
 
     let zpl = `^XA
 ^PW${printWidth}
@@ -86,25 +103,45 @@
 ^LH0,0
 ^LT0
 ^CI28
-^FO${MARGIN_X},${yName}^A0N,11,11^FB${contentWidth},1,0,L,0^FD${escapeZpl(name)}^FS`;
+^FO${MARGIN_X},${y}^A0N,${fontName},${fontName}^FB${textWidth},2,${gap},L,0^FD${escapeZpl(name)}^FS`;
 
-    if (codeLine) {
-      zpl += `\n^FO${MARGIN_X},${yCode}^A0N,9,9^FB${contentWidth},1,0,L,0^FD${escapeZpl(codeLine)}^FS`;
+    y += fontName * 2 + gap + 2;
+    if (ndcFormatted) {
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCodeLabel},${fontCodeLabel}^FDNDC^FS`;
+      y += fontCodeLabel + 1;
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCode},${fontCode}^FD${escapeZpl(ndcFormatted)}^FS`;
+      y += fontCode + gap;
+    } else if (upcLine) {
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCode},${fontCode}^FB${textWidth},1,0,L,0^FD${escapeZpl(upcLine)}^FS`;
+      y += fontCode + gap;
     }
 
-    zpl += `\n^FO${MARGIN_X},${yCost}^A0N,${priceHeight},${priceHeight}^FD${escapeZpl(price)}^FS`;
+    zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontPrice},${fontPrice}^FD${escapeZpl(price)}^FS`;
+    y += fontPrice + gap;
 
     if (supplier) {
-      zpl += `\n^FO${MARGIN_X},${ySupplier}^A0N,9,9^FD${escapeZpl(supplier)}^FS`;
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontMed},${fontMed}^FB${textWidth},1,0,L,0^FD${escapeZpl(supplier)}^FS`;
+      y += fontMed + gap;
     }
 
-    if (received) {
-      const dateX = lot ? MARGIN_X : MARGIN_X;
-      zpl += `\n^FO${dateX},${yFooter}^A0N,9,9^FDRcvd ${escapeZpl(received)}^FS`;
-    }
-
+    const footerGap = 2;
+    const footerBottom = labelLength - 6;
     if (lot) {
-      zpl += `\n^FO${Math.round(printWidth * 0.45)},${yFooter}^A0N,9,9^FDLot ${escapeZpl(lot)}^FS`;
+      const lotY = footerBottom - fontSmall;
+      zpl += `\n^FO${MARGIN_X},${lotY}^A0N,${fontSmall},${fontSmall}^FDLot ${escapeZpl(lot)}^FS`;
+    }
+    if (received) {
+      const rcvdY = lot
+        ? footerBottom - fontSmall * 2 - footerGap
+        : footerBottom - fontSmall;
+      zpl += `\n^FO${MARGIN_X},${rcvdY}^A0N,${fontSmall},${fontSmall}^FDRcvd ${escapeZpl(received)}^FS`;
+    }
+
+    if (ndcDigits) {
+      const dmSize = dmModule * 16;
+      const dmX = printWidth - dmSize - 14;
+      const dmY = labelLength - dmSize - 10;
+      zpl += `\n^FO${dmX},${dmY}^BXN,${dmModule},200^FD${ndcDigits}^FS`;
     }
 
     zpl += '\n^XZ';

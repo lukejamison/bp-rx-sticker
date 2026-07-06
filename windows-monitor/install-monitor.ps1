@@ -49,7 +49,7 @@ if (-not (Test-Path $ExePath)) {
 }
 
 Write-InstallLog "Monitor exe: $ExePath"
-Write-InstallLog "Task name: $TaskName (RunLevel: Highest — Administrator)"
+Write-InstallLog "Task name: $TaskName (RunLevel: Highest - Administrator)"
 
 $Action = New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory (Split-Path $ExePath)
 $Trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -68,7 +68,7 @@ Register-ScheduledTask `
     -Trigger $Trigger `
     -Principal $Principal `
     -Settings $Settings `
-    -Description 'BP RX Bridge Monitor tray app (admin — health, restart bridge, send logs)' `
+    -Description 'BP RX Bridge Monitor tray app (admin - health, restart bridge, send logs)' `
     -Force | Out-Null
 
 Write-InstallLog 'Starting monitor task ...'

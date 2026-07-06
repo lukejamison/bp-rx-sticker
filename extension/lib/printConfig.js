@@ -1,8 +1,8 @@
 const DEFAULT_PRINTER_IP = '172.18.129.132';
 const DEFAULT_PRINT_BRIDGE_URL = 'http://127.0.0.1:9101/print';
-/** 1" × 0.5" @ 203 dpi */
+/** 1" x 1" @ 203 dpi */
 const DEFAULT_PRINT_WIDTH = 203;
-const DEFAULT_LABEL_LENGTH = 102;
+const DEFAULT_LABEL_LENGTH = 203;
 
 async function getPrintSettings() {
   return chrome.storage.sync.get({

@@ -10,7 +10,7 @@ export const config = {
   apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://172.18.129.154:3000',
   
   // Default time window for recent invoices (hours)
-  defaultTimeWindow: 24,
+  defaultTimeWindow: 168,
 };
 
 // Debug logger

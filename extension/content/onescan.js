@@ -105,11 +105,15 @@ async function maybePrintOneLabel(result, parsedHint) {
   try {
     const printSettings = await chrome.storage.sync.get({
       printWidth: 203,
-      labelLength: 102,
+      labelLength: 203,
     });
     if (printSettings.printWidth === 448 && printSettings.labelLength === 582) {
       printSettings.printWidth = 203;
-      printSettings.labelLength = 102;
+      printSettings.labelLength = 203;
+    }
+    if (printSettings.labelLength === 102) {
+      printSettings.labelLength = 203;
+      await chrome.storage.sync.set({ labelLength: 203 });
     }
 
     const zpl = generateLabel({

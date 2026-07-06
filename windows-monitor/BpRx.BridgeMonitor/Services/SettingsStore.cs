@@ -71,13 +71,27 @@ public sealed class SettingsStore
 
     private static void ApplyDefaults(MonitorSettings settings)
     {
+        if (string.IsNullOrWhiteSpace(settings.BridgeLogDirectory))
+        {
+            TryApplyBridgePaths(settings, AppContext.BaseDirectory);
+
+            var dir = AppContext.BaseDirectory;
+            for (var i = 0; i < 10 && !string.IsNullOrEmpty(dir); i++)
+            {
+                if (!string.IsNullOrWhiteSpace(settings.BridgeLogDirectory)) break;
+                TryApplyBridgePaths(settings, dir);
+                dir = Path.GetDirectoryName(dir);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.BridgeLogDirectory)) return;
+
+        TryDiscoverFromGitApps(settings);
         if (!string.IsNullOrWhiteSpace(settings.BridgeLogDirectory)) return;
 
         var candidates = new[]
         {
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BP-RX", "logs"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "extension", "print-bridge", "logs"),
-            Path.Combine(AppContext.BaseDirectory, "..", "extension", "print-bridge", "logs"),
         };
 
         foreach (var candidate in candidates)
@@ -88,11 +102,6 @@ public sealed class SettingsStore
                 if (Directory.Exists(full))
                 {
                     settings.BridgeLogDirectory = full;
-                    var configCandidate = Path.Combine(Path.GetDirectoryName(full)!, "config.local.env");
-                    if (string.IsNullOrWhiteSpace(settings.BridgeConfigPath) && File.Exists(configCandidate))
-                    {
-                        settings.BridgeConfigPath = configCandidate;
-                    }
                     break;
                 }
             }
@@ -100,6 +109,46 @@ public sealed class SettingsStore
             {
                 // skip invalid path
             }
+        }
+    }
+
+    private static void TryDiscoverFromGitApps(MonitorSettings settings)
+    {
+        try
+        {
+            var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var gitApps = Path.Combine(docs, "Git Apps");
+            if (!Directory.Exists(gitApps)) return;
+
+            foreach (var repo in Directory.EnumerateDirectories(gitApps, "bp-rx-sticker*", SearchOption.AllDirectories))
+            {
+                TryApplyBridgePaths(settings, repo);
+                if (!string.IsNullOrWhiteSpace(settings.BridgeLogDirectory)) return;
+            }
+        }
+        catch
+        {
+            // skip discovery errors
+        }
+    }
+
+    private static void TryApplyBridgePaths(MonitorSettings settings, string baseDir)
+    {
+        try
+        {
+            var logDir = Path.GetFullPath(Path.Combine(baseDir, "extension", "print-bridge", "logs"));
+            if (!Directory.Exists(logDir)) return;
+
+            settings.BridgeLogDirectory = logDir;
+            var configPath = Path.Combine(Path.GetDirectoryName(logDir)!, "config.local.env");
+            if (File.Exists(configPath))
+            {
+                settings.BridgeConfigPath = configPath;
+            }
+        }
+        catch
+        {
+            // skip invalid path
         }
     }
 }

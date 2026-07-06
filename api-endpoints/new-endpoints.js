@@ -4,15 +4,32 @@
  * Date: 2026-02-08
  */
 
+// Match if either status change OR invoice date falls inside the lookup window.
+const RECENT_INVOICE_TIME_FILTER = `
+              AND (
+                "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+                OR "InvoiceDate" >= NOW() - INTERVAL '1 hour' * $2
+              )`;
+
+function ndcLookupVariants(code) {
+    const digits = String(code || '').replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 11) return [code];
+
+    const variants = new Set([code, digits, digits.padStart(11, '0')]);
+    const unpadded = digits.replace(/^0+/, '');
+    if (unpadded) variants.add(unpadded);
+    return [...variants];
+}
+
 // ==========================================
-// ENDPOINT 1: Get Recent Invoice by UPC (24hr filter)
+// ENDPOINT 1: Get Recent Invoice by UPC (recent window filter)
 // ==========================================
 // GET /api/items/upc/:upc/recent
-// Returns item only if StatusChangedOn is within last 24 hours
+// Returns item if StatusChangedOn or InvoiceDate is within the hours window
 
 app.get('/api/items/upc/:upc/recent', async (req, res) => {
     const { upc } = req.params;
-    const { hours = 24 } = req.query; // Default 24 hours, can override with ?hours=48
+    const { hours = 168 } = req.query; // Default 7 days
     
     try {
         const query = `
@@ -27,7 +44,7 @@ app.get('/api/items/upc/:upc/recent', async (req, res) => {
                 "TotalItems"
             FROM "prx-invoices"
             WHERE "ItemDetails"::text LIKE $1
-              AND "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+${RECENT_INVOICE_TIME_FILTER}
             ORDER BY "StatusChangedOn" DESC
             LIMIT 1
         `;
@@ -115,7 +132,7 @@ app.get('/api/items/upc/:upc/recent', async (req, res) => {
 
 app.get('/api/items/ndc/:ndc/recent', async (req, res) => {
     const { ndc } = req.params;
-    const { hours = 24 } = req.query;
+    const { hours = 168 } = req.query;
     
     try {
         const query = `
@@ -130,7 +147,7 @@ app.get('/api/items/ndc/:ndc/recent', async (req, res) => {
                 "TotalItems"
             FROM "prx-invoices"
             WHERE "ItemDetails"::text LIKE $1
-              AND "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+${RECENT_INVOICE_TIME_FILTER}
             ORDER BY "StatusChangedOn" DESC
             LIMIT 1
         `;
@@ -528,7 +545,7 @@ app.get('/api/stats/completed', async (req, res) => {
 
 app.get('/api/items/barcode/:code/recent', async (req, res) => {
     const { code } = req.params;
-    const { hours = 24 } = req.query;
+    const { hours = 168 } = req.query;
     
     try {
         // Try UPC first
@@ -544,19 +561,26 @@ app.get('/api/items/barcode/:code/recent', async (req, res) => {
                 "TotalItems"
             FROM "prx-invoices"
             WHERE "ItemDetails"::text LIKE $1
-              AND "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
+${RECENT_INVOICE_TIME_FILTER}
             ORDER BY "StatusChangedOn" DESC
             LIMIT 1
         `;
         
         let result = await pool.query(upcQuery, [`%"UPC":"${code}"%`, hours]);
         let searchType = 'UPC';
+        let matchedCode = code;
         let item = null;
         
-        // If not found by UPC, try NDC
         if (result.rows.length === 0) {
-            result = await pool.query(upcQuery, [`%"NDC":"${code}"%`, hours]);
-            searchType = 'NDC';
+            for (const ndcVariant of ndcLookupVariants(code)) {
+                const ndcResult = await pool.query(upcQuery, [`%"NDC":"${ndcVariant}"%`, hours]);
+                if (ndcResult.rows.length > 0) {
+                    result = ndcResult;
+                    searchType = 'NDC';
+                    matchedCode = ndcVariant;
+                    break;
+                }
+            }
         }
         
         if (result.rows.length === 0) {
@@ -571,11 +595,10 @@ app.get('/api/items/barcode/:code/recent', async (req, res) => {
         const invoice = result.rows[0];
         const itemDetails = JSON.parse(invoice.ItemDetails);
         
-        // Find the item
         if (searchType === 'UPC') {
             item = itemDetails.find(i => i.UPC === code);
         } else {
-            item = itemDetails.find(i => i.NDC === code);
+            item = itemDetails.find(i => ndcLookupVariants(code).includes(i.NDC));
         }
         
         if (!item) {

@@ -1,12 +1,12 @@
 const DEFAULTS = {
   apiUrl: 'http://172.18.129.154:3000',
-  hours: 24,
+  hours: 168,
   mockPrint: true,
   enabled: true,
   printerIp: '172.18.129.132',
   printBridgeUrl: 'http://127.0.0.1:9101/print',
   printWidth: 203,
-  labelLength: 102,
+  labelLength: 203,
 };
 
 const apiUrlInput = document.getElementById('apiUrl');
@@ -38,7 +38,7 @@ function updateHoursHint() {
   const effective = getEffectiveHours(configured);
   const day = new Date().getDay();
   if (day === 0 || day === 1) {
-    hoursHint.textContent = `Today uses ${effective}h window (Sun/Mon auto-widen for Fri/Sat invoices).`;
+    hoursHint.textContent = `Today uses ${effective}h window (Sun/Mon auto-widen to at least 7 days).`;
   } else {
     hoursHint.textContent = `Lookup window: ${effective} hours.`;
   }
@@ -46,6 +46,10 @@ function updateHoursHint() {
 
 async function loadSettings() {
   const settings = await chrome.storage.sync.get(DEFAULTS);
+  if (settings.hours === 24) {
+    settings.hours = DEFAULTS.hours;
+    await chrome.storage.sync.set({ hours: settings.hours });
+  }
   if (settings.printWidth === 448 && settings.labelLength === 582) {
     settings.printWidth = DEFAULTS.printWidth;
     settings.labelLength = DEFAULTS.labelLength;
@@ -53,6 +57,10 @@ async function loadSettings() {
       printWidth: settings.printWidth,
       labelLength: settings.labelLength,
     });
+  }
+  if (settings.labelLength === 102) {
+    settings.labelLength = DEFAULTS.labelLength;
+    await chrome.storage.sync.set({ labelLength: settings.labelLength });
   }
   apiUrlInput.value = settings.apiUrl;
   hoursInput.value = settings.hours;

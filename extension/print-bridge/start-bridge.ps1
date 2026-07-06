@@ -1,5 +1,5 @@
-# BP RX Print Bridge — process wrapper (used by Windows Scheduled Task)
-# Loads config.local.env, logs to logs/, runs server.js
+# BP RX Print Bridge - process wrapper (used by Windows Scheduled Task)
+# Loads config.local.env, logs to logs/, runs server.js (restarts if node exits)
 
 $ErrorActionPreference = 'Continue'
 
@@ -8,6 +8,7 @@ $LogDir = Join-Path $BridgeDir 'logs'
 $ConfigPath = Join-Path $BridgeDir 'config.local.env'
 $ServerScript = Join-Path $BridgeDir 'server.js'
 $LogFile = Join-Path $LogDir ("bridge-{0:yyyy-MM-dd}.log" -f (Get-Date))
+$RestartDelaySec = 5
 
 function Write-BridgeLog {
   param(
@@ -54,6 +55,71 @@ function Import-BridgeEnvFile {
   }
 }
 
+function Resolve-NodeExe {
+  if ($env:NODE_EXE -and (Test-Path $env:NODE_EXE)) {
+    return $env:NODE_EXE
+  }
+
+  $cmd = Get-Command node -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source) {
+    return $cmd.Source
+  }
+
+  $candidates = @(
+    'C:\Program Files\nodejs\node.exe',
+    'C:\Program Files (x86)\nodejs\node.exe'
+  )
+  foreach ($path in $candidates) {
+    if (Test-Path $path) { return $path }
+  }
+
+  return $null
+}
+
+function Stop-StaleBridgeNodes {
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -match 'print-bridge' -and $_.CommandLine -match 'server\.js' } |
+    ForEach-Object {
+      Write-BridgeLog "Stopping stale node PID $($_.ProcessId)" 'WARN'
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
+  Start-Sleep -Milliseconds 500
+}
+
+function Start-BridgeNodeProcess {
+  param([string]$NodeExe)
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $NodeExe
+  $psi.Arguments = '"' + $ServerScript + '"'
+  $psi.WorkingDirectory = $BridgeDir
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $true
+
+  foreach ($key in @('PRINTER_IP', 'PRINTER_PORT', 'PRINT_BRIDGE_HOST', 'PRINT_BRIDGE_PORT')) {
+    $value = [Environment]::GetEnvironmentVariable($key)
+    if ($value) {
+      $psi.EnvironmentVariables[$key] = $value
+    }
+  }
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  $null = $process.add_OutputDataReceived({ param($s, $e) if ($e.Data) { Write-BridgeLog $e.Data 'NODE' } })
+  $null = $process.add_ErrorDataReceived({ param($s, $e) if ($e.Data) { Write-BridgeLog $e.Data 'NODE-ERR' } })
+
+  if (-not $process.Start()) {
+    throw 'Failed to start node process'
+  }
+
+  $process.BeginOutputReadLine()
+  $process.BeginErrorReadLine()
+  return $process
+}
+
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 Write-BridgeLog '========== BP RX Print Bridge starting =========='
@@ -70,9 +136,9 @@ if (-not (Test-Path $ServerScript)) {
   exit 1
 }
 
-$nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+$nodeExe = Resolve-NodeExe
 if (-not $nodeExe) {
-  Write-BridgeLog 'Node.js not found on PATH. Install Node.js LTS and re-run install.' 'ERROR'
+  Write-BridgeLog 'Node.js not found. Install Node.js LTS and re-run install-windows.bat' 'ERROR'
   exit 1
 }
 
@@ -84,50 +150,35 @@ $printerPort = if ($env:PRINTER_PORT) { $env:PRINTER_PORT } else { '9100' }
 $bridgeHost = if ($env:PRINT_BRIDGE_HOST) { $env:PRINT_BRIDGE_HOST } else { '127.0.0.1' }
 $bridgePort = if ($env:PRINT_BRIDGE_PORT) { $env:PRINT_BRIDGE_PORT } else { '9101' }
 
-Write-BridgeLog "Target printer: $($printerIp):$($printerPort)"
-Write-BridgeLog "Bridge listen: http://$($bridgeHost):$($bridgePort)"
+Write-BridgeLog ('Target printer: ' + $printerIp + ':' + $printerPort)
+Write-BridgeLog ('Bridge listen: http://' + $bridgeHost + ':' + $bridgePort)
 
 Set-Location $BridgeDir
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $nodeExe
-$psi.Arguments = "`"$ServerScript`""
-$psi.WorkingDirectory = $BridgeDir
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$psi.CreateNoWindow = $true
+Stop-StaleBridgeNodes
 
-foreach ($key in @('PRINTER_IP', 'PRINTER_PORT', 'PRINT_BRIDGE_HOST', 'PRINT_BRIDGE_PORT')) {
-  $value = [Environment]::GetEnvironmentVariable($key)
-  if ($value) {
-    $psi.EnvironmentVariables[$key] = $value
-  }
-}
+$run = 0
+$exitCode = 0
+while ($true) {
+  $run += 1
+  Write-BridgeLog "Launching node server.js (run #$run) ..."
 
-try {
-  $process = New-Object System.Diagnostics.Process
-  $process.StartInfo = $psi
-  $null = $process.add_OutputDataReceived({ param($s, $e) if ($e.Data) { Write-BridgeLog $e.Data 'NODE' } })
-  $null = $process.add_ErrorDataReceived({ param($s, $e) if ($e.Data) { Write-BridgeLog $e.Data 'NODE-ERR' } })
-
-  Write-BridgeLog 'Launching node server.js ...'
-  if (-not $process.Start()) {
-    Write-BridgeLog 'Failed to start node process' 'ERROR'
-    exit 1
+  if ($run -gt 1 -or $exitCode -eq 2) {
+    Stop-StaleBridgeNodes
   }
 
-  $process.BeginOutputReadLine()
-  $process.BeginErrorReadLine()
+  try {
+    $process = Start-BridgeNodeProcess -NodeExe $nodeExe
+    Write-BridgeLog "Node PID: $($process.Id)"
+    $process.WaitForExit()
+    $exitCode = $process.ExitCode
+    $level = if ($exitCode -eq 0) { 'WARN' } else { 'ERROR' }
+    Write-BridgeLog "Node exited with code $exitCode" $level
+  } catch {
+    Write-BridgeLog "Bridge wrapper failed: $($_.Exception.Message)" 'ERROR'
+    $exitCode = 1
+  }
 
-  Write-BridgeLog "Node PID: $($process.Id)"
-  $process.WaitForExit()
-  $exitCode = $process.ExitCode
-  Write-BridgeLog "Node exited with code $exitCode" $(if ($exitCode -eq 0) { 'INFO' } else { 'ERROR' })
-  exit $exitCode
-} catch {
-  Write-BridgeLog "Bridge wrapper failed: $($_.Exception.Message)" 'ERROR'
-  exit 1
-} finally {
-  Write-BridgeLog '========== BP RX Print Bridge stopped =========='
+  Write-BridgeLog "Restarting bridge in $RestartDelaySec seconds ..." 'WARN'
+  Start-Sleep -Seconds $RestartDelaySec
 }
