@@ -45,22 +45,35 @@ async function checkPrintBridgeHealth(settings) {
 async function printZplViaBridge(zpl, settings) {
   const url = (settings.printBridgeUrl || DEFAULT_PRINT_BRIDGE_URL).replace(/\/$/, '');
   const printUrl = url.endsWith('/print') ? url : `${url}/print`;
+  const timeoutMs = Math.min(120000, 20000 + zpl.length * 4);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const response = await fetch(printUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain',
-      'X-Printer-IP': settings.printerIp || DEFAULT_PRINTER_IP,
-    },
-    body: zpl,
-  });
+  try {
+    const response = await fetch(printUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain',
+        'X-Printer-IP': settings.printerIp || DEFAULT_PRINTER_IP,
+      },
+      body: zpl,
+      signal: controller.signal,
+    });
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.ok === false) {
-    throw new Error(data.error || `Print bridge failed (${response.status})`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || `Print bridge failed (${response.status})`);
+    }
+
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Print bridge timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return data;
 }
 
 if (typeof self !== 'undefined') {

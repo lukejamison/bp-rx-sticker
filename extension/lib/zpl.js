@@ -165,9 +165,28 @@
     });
   }
 
+  /** Label count from API item (invoice qty, then received qty). */
+  function resolveLabelCount(item) {
+    const raw = item?.invoiceQty ?? item?.receivedQty ?? item?.invoiceQuantity ?? item?.receivedQuantity ?? '1';
+    const n = Number.parseInt(String(raw).replace(/[^\d]/g, ''), 10);
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.min(n, 99);
+  }
+
+  function generateMultipleLabels(data, quantity) {
+    const qty = Math.max(1, Math.min(Number(quantity) || 1, 99));
+    const labels = [];
+    for (let i = 0; i < qty; i++) {
+      labels.push(generateLabel(data));
+    }
+    return labels.join('\n');
+  }
+
   root.DEFAULT_PRINT_WIDTH = DEFAULT_PRINT_WIDTH;
   root.DEFAULT_LABEL_LENGTH = DEFAULT_LABEL_LENGTH;
   root.LABEL_HOME_Y = LABEL_HOME_Y;
   root.generateLabel = generateLabel;
+  root.generateMultipleLabels = generateMultipleLabels;
+  root.resolveLabelCount = resolveLabelCount;
   root.generateTestLabel = generateTestLabel;
 })(typeof globalThis !== 'undefined' ? globalThis : self);

@@ -26,10 +26,10 @@ function buildDedupeKey(raw, parsed) {
   return parsed.upc || raw.trim();
 }
 
-function buildLabelZpl(lastResult, printSettings) {
+function buildLabelData(lastResult) {
   if (!lastResult?.item) return null;
 
-  return generateLabel({
+  return {
     itemName: lastResult.item.itemName,
     ndc: lastResult.item.ndc,
     upc: lastResult.parsed?.upc || lastResult.matchedCode || lastResult.item.upc,
@@ -37,9 +37,22 @@ function buildLabelZpl(lastResult, printSettings) {
     cost: lastResult.item.cost,
     dateReceived: lastResult.item.lastReceived,
     supplier: lastResult.item.supplier,
-    printWidth: printSettings.printWidth,
-    labelLength: printSettings.labelLength,
-  });
+  };
+}
+
+function buildLabelZpl(lastResult, printSettings, labelCount) {
+  const data = buildLabelData(lastResult);
+  if (!data) return null;
+
+  const count = labelCount ?? lastResult.labelCount ?? resolveLabelCount(lastResult.item);
+  return generateMultipleLabels(
+    {
+      ...data,
+      printWidth: printSettings.printWidth,
+      labelLength: printSettings.labelLength,
+    },
+    count
+  );
 }
 
 async function processScan(raw, meta = {}) {
@@ -130,6 +143,7 @@ async function processScan(raw, meta = {}) {
     invoice: result.invoice,
     completed: result.completed,
     completionInfo: result.completionInfo,
+    labelCount: resolveLabelCount(result.item),
     at: new Date().toISOString(),
     timing: {
       scanStartedAt,
@@ -192,11 +206,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           });
         }
 
-        const zpl = buildLabelZpl(lastResult, printSettings);
+        const labelCount = lastResult.labelCount ?? resolveLabelCount(lastResult.item);
+        const zpl = buildLabelZpl(lastResult, printSettings, labelCount);
         if (!zpl) throw new Error('Could not build label from last scan');
 
         const data = await printZplViaBridge(zpl, printSettings);
-        sendResponse({ ok: true, ...data, itemName: lastResult.item.itemName });
+        sendResponse({
+          ok: true,
+          ...data,
+          itemName: lastResult.item.itemName,
+          labelCount,
+        });
       })
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;

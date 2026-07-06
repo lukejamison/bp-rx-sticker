@@ -97,8 +97,13 @@ function formatParsedMeta(parsed) {
   return parts.join(' · ');
 }
 
-async function maybePrintOneLabel(result, parsedHint) {
-  if (result.status !== 'ready_to_print' || result.mockPrint || printInFlight) return 0;
+async function maybePrintLabels(result, parsedHint) {
+  const labelCount = result.labelCount ?? resolveLabelCount(result.item);
+  result.labelCount = labelCount;
+
+  if (result.status !== 'ready_to_print' || result.mockPrint || printInFlight) {
+    return { printMs: 0, labelCount };
+  }
 
   printInFlight = true;
   const printStart = Date.now();
@@ -116,20 +121,23 @@ async function maybePrintOneLabel(result, parsedHint) {
       await chrome.storage.sync.set({ labelLength: 203 });
     }
 
-    const zpl = generateLabel({
-      itemName: result.item.itemName,
-      ndc: result.item.ndc,
-      upc: result.parsed?.upc || result.matchedCode || result.item.upc,
-      lot: result.parsed?.lot || parsedHint?.lot,
-      cost: result.item.cost,
-      dateReceived: result.item.lastReceived,
-      supplier: result.item.supplier,
-      printWidth: printSettings.printWidth,
-      labelLength: printSettings.labelLength,
-    });
-    await printOneLabel(zpl);
+    const zpl = generateMultipleLabels(
+      {
+        itemName: result.item.itemName,
+        ndc: result.item.ndc,
+        upc: result.parsed?.upc || result.matchedCode || result.item.upc,
+        lot: result.parsed?.lot || parsedHint?.lot,
+        cost: result.item.cost,
+        dateReceived: result.item.lastReceived,
+        supplier: result.item.supplier,
+        printWidth: printSettings.printWidth,
+        labelLength: printSettings.labelLength,
+      },
+      labelCount
+    );
+    await printLabels(zpl, labelCount);
     result.printed = true;
-    return Date.now() - printStart;
+    return { printMs: Date.now() - printStart, labelCount };
   } finally {
     printInFlight = false;
   }
@@ -196,18 +204,19 @@ async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
   }
 
   try {
-    const printMs = await maybePrintOneLabel(result, parsedHint);
+    const { printMs, labelCount } = await maybePrintLabels(result, parsedHint);
     finalizeTiming(result, scanStartedAt, printMs);
     await persistLastResult(result);
     BP_RX.log('Scan timing', result.timing);
 
+    const qtyLabel = labelCount === 1 ? '1 label' : `${labelCount} labels`;
     ensureStatusBadge({
       variant: 'listening',
       text: `BP RX: done (${BP_RX.formatDuration(result.timing.totalMs)})`,
     });
     showToast(
       'success',
-      result.mockPrint ? 'Would print 1 label' : 'Printed 1 label',
+      result.mockPrint ? `Would print ${qtyLabel}` : `Printed ${qtyLabel}`,
       itemName,
       [
         invoiceNumber ? `Invoice ${invoiceNumber}` : null,

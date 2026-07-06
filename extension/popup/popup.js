@@ -18,6 +18,11 @@ function canReprint(result) {
   return Boolean(result?.item?.itemName && (result.ok || result.status === 'already_completed'));
 }
 
+function labelCountText(count) {
+  const n = Number(count) || 1;
+  return n === 1 ? '1 label' : `${n} labels`;
+}
+
 function renderLastResult(result) {
   currentLastResult = result;
 
@@ -29,12 +34,15 @@ function renderLastResult(result) {
   lastResultSection.classList.remove('hidden');
   reprintButton.disabled = !canReprint(result);
 
+  const qty = result.labelCount || 1;
+  const qtyText = labelCountText(qty);
+
   let cardClass = 'error';
   let headline = result.message || 'Unknown';
 
   if (result.status === 'ready_to_print') {
     cardClass = 'success';
-    headline = result.mockPrint ? 'Would print 1 label' : 'Printed 1 label';
+    headline = result.mockPrint ? `Would print ${qtyText}` : `Printed ${qtyText}`;
   } else if (result.ok && result.status === 'already_completed') {
     cardClass = 'warn';
     headline = 'Already completed';
@@ -43,6 +51,9 @@ function renderLastResult(result) {
   const lines = [];
   if (result.item?.itemName) lines.push(result.item.itemName);
   if (result.item?.cost) lines.push(`Cost: $${result.item.cost}`);
+  if (qty > 1 || result.item?.invoiceQty) {
+    lines.push(`Qty: ${result.item?.invoiceQty || qty}`);
+  }
   if (result.invoice?.invoiceNumber) lines.push(`Invoice ${result.invoice.invoiceNumber}`);
   if (result.parsed?.lot) lines.push(`Lot: ${result.parsed.lot}`);
   if (result.timing?.totalMs != null) lines.push(`Total: ${formatDuration(result.timing.totalMs)}`);
@@ -105,7 +116,8 @@ reprintButton.addEventListener('click', async () => {
   try {
     const result = await chrome.runtime.sendMessage({ type: 'REPRINT_LAST', force: true });
     if (result?.ok) {
-      actionStatus.textContent = `Reprinted — ${result.itemName || 'label sent'}`;
+      const qty = result.labelCount || currentLastResult?.labelCount || 1;
+      actionStatus.textContent = `Reprinted ${labelCountText(qty)} — ${result.itemName || 'sent'}`;
     } else {
       actionStatus.textContent = result?.error || 'Reprint failed';
     }
