@@ -76,9 +76,27 @@ function Resolve-NodeExe {
   return $null
 }
 
+function Stop-BridgePortListeners {
+  param([int]$Port = 9101)
+
+  $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+  foreach ($conn in $listeners) {
+    $pid = $conn.OwningProcess
+    if (-not $pid) { continue }
+    Write-BridgeLog "Stopping PID $pid listening on port $Port" 'WARN'
+    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+  }
+
+  if ($listeners) {
+    Start-Sleep -Seconds 1
+  }
+}
+
 function Stop-StaleBridgeNodes {
+  Stop-BridgePortListeners -Port $(if ($env:PRINT_BRIDGE_PORT) { [int]$env:PRINT_BRIDGE_PORT } else { 9101 })
+
   Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine -match 'print-bridge' -and $_.CommandLine -match 'server\.js' } |
+    Where-Object { $_.CommandLine -and $_.CommandLine -match 'server\.js' -and $_.CommandLine -match 'print-bridge' } |
     ForEach-Object {
       Write-BridgeLog "Stopping stale node PID $($_.ProcessId)" 'WARN'
       Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue

@@ -94,6 +94,21 @@ Write-Section 'Print bridge processes'
 $bridgeNodes = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -match 'print-bridge' -and $_.CommandLine -match 'server\.js' }
 
+$portListeners = Get-NetTCPConnection -LocalPort $BridgePort -State Listen -ErrorAction SilentlyContinue
+if ($portListeners) {
+  foreach ($conn in $portListeners) {
+    $lpid = $conn.OwningProcess
+    $inList = $bridgeNodes | Where-Object { $_.ProcessId -eq $lpid }
+    if ($inList) {
+      Write-Ok "Port $BridgePort listener PID $lpid (matches bridge node)"
+    } else {
+      Write-Warn "Port $BridgePort listener PID $lpid (ZOMBIE — not in bridge node list; blocks new bridge)"
+    }
+  }
+} else {
+  Write-Warn "Nothing listening on port $BridgePort"
+}
+
 if (-not $bridgeNodes -or $bridgeNodes.Count -eq 0) {
   Write-Warn 'No node print-bridge process running (bridge may be down).'
 } elseif ($bridgeNodes.Count -eq 1) {

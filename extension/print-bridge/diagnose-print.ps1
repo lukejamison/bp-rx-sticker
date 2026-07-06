@@ -71,10 +71,17 @@ Section 'Bridge health'
 try {
   $health = Invoke-RestMethod -Uri 'http://127.0.0.1:9101/health' -TimeoutSec 5
   Write-Report ($health | ConvertTo-Json -Depth 4)
+  if ($health.queueDepth -gt 0) {
+    Write-Report "CRITICAL: queueDepth=$($health.queueDepth) — a print job is STUCK. Run reset-bridge.ps1"
+  }
+  $listenerPid = (Get-NetTCPConnection -LocalPort 9101 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
+  if ($health.pid -and $listenerPid -and $health.pid -ne $listenerPid) {
+    Write-Report "CRITICAL: health pid=$($health.pid) but port 9101 owned by PID $listenerPid — zombie bridge. Run reset-bridge.ps1"
+  }
   if (-not $health.bridgeVersion) {
-    Write-Report 'WARN: bridgeVersion missing — old server.js still running. git pull + restart bridge.'
+    Write-Report 'WARN: bridgeVersion missing — old server.js. git pull then reset-bridge.ps1'
   } elseif ($health.bridgeVersion -ne '0.4.2') {
-    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.2"
+    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.2 — git pull then reset-bridge.ps1"
   }
   $printerIp = $health.printerIp
 } catch {
