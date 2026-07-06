@@ -8,9 +8,10 @@ const http = require('http');
 const net = require('net');
 const path = require('path');
 
+const BRIDGE_VERSION = '0.4.2';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
-const DEFAULT_PRINTER_IP = '172.18.129.123';
+const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
@@ -253,6 +254,7 @@ async function handleRequest(req, res) {
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ok: true,
+      bridgeVersion: BRIDGE_VERSION,
       printerIp: DEFAULT_PRINTER_IP,
       printerPort: PRINTER_PORT,
       pid: process.pid,
@@ -319,6 +321,7 @@ let listenRetries = 15;
 function tryListen() {
   server.listen(BRIDGE_PORT, BRIDGE_HOST, () => {
     log('INFO', 'listening', {
+      bridgeVersion: BRIDGE_VERSION,
       bridge: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
       printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
       pid: process.pid,
