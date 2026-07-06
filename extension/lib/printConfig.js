@@ -1,17 +1,26 @@
-const DEFAULT_PRINTER_IP = '172.18.129.132';
+const DEFAULT_PRINTER_IP = '172.18.129.123';
 const DEFAULT_PRINT_BRIDGE_URL = 'http://127.0.0.1:9101/print';
 /** 1" x 1" @ 203 dpi */
 const DEFAULT_PRINT_WIDTH = 203;
 const DEFAULT_LABEL_LENGTH = 203;
 
+const LEGACY_PRINTER_IP = '172.18.129.132';
+
 async function getPrintSettings() {
-  return chrome.storage.sync.get({
+  const settings = await chrome.storage.sync.get({
     printerIp: DEFAULT_PRINTER_IP,
     printBridgeUrl: DEFAULT_PRINT_BRIDGE_URL,
     printWidth: DEFAULT_PRINT_WIDTH,
     labelLength: DEFAULT_LABEL_LENGTH,
     printMethod: 'network',
   });
+
+  if (!settings.printerIp || settings.printerIp === LEGACY_PRINTER_IP) {
+    settings.printerIp = DEFAULT_PRINTER_IP;
+    await chrome.storage.sync.set({ printerIp: DEFAULT_PRINTER_IP });
+  }
+
+  return settings;
 }
 
 function bridgeHealthUrl(settings) {
@@ -52,10 +61,7 @@ async function printZplViaBridge(zpl, settings) {
   try {
     const response = await fetch(printUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain',
-        'X-Printer-IP': settings.printerIp || DEFAULT_PRINTER_IP,
-      },
+      headers: { 'Content-Type': 'text/plain' },
       body: zpl,
       signal: controller.signal,
     });

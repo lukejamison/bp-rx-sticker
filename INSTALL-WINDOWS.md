@@ -9,7 +9,7 @@ OneScan workstation only. Do these in order.
 - [ ] [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) installed (`dotnet -v` works) — needed to build the monitor app
 - [ ] Google Chrome
 - [ ] This repo copied to the PC (e.g. `C:\bp-rx-sticker`)
-- [ ] Zebra printer IP ready (e.g. `172.18.129.132`)
+- [ ] Zebra printer IP ready (e.g. `172.18.129.123`)
 
 ---
 
@@ -24,7 +24,7 @@ extension\print-bridge\install-windows.bat
 Enter your **printer IP** when prompted (or pass it on the command line):
 
 ```bat
-extension\print-bridge\install-windows.bat 172.18.129.132
+extension\print-bridge\install-windows.bat 172.18.129.123
 ```
 
 **Check:** open in Chrome → http://127.0.0.1:9101/health  

@@ -77,7 +77,7 @@ Start with **Option A**: smallest footprint, easy scheduled-task integration, no
 
 ```
 GET http://127.0.0.1:9101/health
-→ 200 { "ok": true, "printerIp": "172.18.129.132", "printerPort": 9100 }
+→ 200 { "ok": true, "printerIp": "172.18.129.123", "printerPort": 9100 }
 ```
 
 Monitor should treat non-200 or `ok: false` as unhealthy.
@@ -104,7 +104,7 @@ Keys:
 
 | Key | Example |
 |-----|---------|
-| `PRINTER_IP` | `172.18.129.132` |
+| `PRINTER_IP` | `172.18.129.123` |
 | `PRINTER_PORT` | `9100` |
 | `PRINT_BRIDGE_HOST` | `127.0.0.1` |
 | `PRINT_BRIDGE_PORT` | `9101` |

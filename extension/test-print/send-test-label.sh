@@ -3,8 +3,8 @@
 #
 # Usage:
 #   ./send-test-label.sh
-#   ./send-test-label.sh 172.18.129.132
-#   ./send-test-label.sh 172.18.129.132 /path/to/label.zpl
+#   ./send-test-label.sh 172.18.129.123
+#   ./send-test-label.sh 172.18.129.123 /path/to/label.zpl
 #
 # Label media: PW 203, LL 203 (1" x 1" at 203 dpi)
 # Default file: sample-price-sticker.zpl
@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-PRINTER_IP="${1:-172.18.129.132}"
+PRINTER_IP="${1:-172.18.129.123}"
 ZPL_FILE="${2:-$(dirname "$0")/sample-price-sticker.zpl}"
 PORT="${PRINTER_PORT:-9100}"
 

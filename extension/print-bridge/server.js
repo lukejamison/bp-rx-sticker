@@ -10,12 +10,10 @@ const path = require('path');
 
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
-const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
+const DEFAULT_PRINTER_IP = '172.18.129.123';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
-const PRINTER_DRAIN_MS = 400;
-const PRINTER_SOCKET_KILL_MS = 2000;
 const INTER_LABEL_MS = 350;
 const HTTP_BODY_MS = 30000;
 const HTTP_PRINT_BASE_MS = 120000;
@@ -46,6 +44,14 @@ function log(level, message, meta) {
   } catch {
     /* ignore */
   }
+}
+
+function resolvePrinterIp(headerIp) {
+  const configured = DEFAULT_PRINTER_IP;
+  if (headerIp && headerIp !== configured) {
+    log('WARN', 'ignoring X-Printer-IP; using bridge PRINTER_IP', { headerIp, configured });
+  }
+  return configured;
 }
 
 function corsHeaders() {
@@ -94,7 +100,7 @@ function printTimeoutsForZpl(zpl) {
   const bytes = Buffer.byteLength(zpl, 'utf8');
   return {
     writeMs: Math.min(60000, PRINTER_WRITE_MS + Math.ceil(bytes / 100)),
-    jobMs: Math.min(90000, PRINTER_CONNECT_MS + PRINTER_WRITE_MS + Math.ceil(bytes / 80) + PRINTER_SOCKET_KILL_MS + 5000),
+    jobMs: Math.min(60000, PRINTER_CONNECT_MS + PRINTER_WRITE_MS + Math.ceil(bytes / 80) + 5000),
   };
 }
 
@@ -149,13 +155,11 @@ function sendZplToPrinter(printerIp, zpl, meta) {
     let client = null;
     let connectTimer = null;
     let writeTimer = null;
-    let killTimer = null;
     let jobTimer = null;
 
     const cleanup = () => {
       clearTimeout(connectTimer);
       clearTimeout(writeTimer);
-      clearTimeout(killTimer);
       clearTimeout(jobTimer);
     };
 
@@ -197,20 +201,8 @@ function sendZplToPrinter(printerIp, zpl, meta) {
         }
 
         log('INFO', 'printer write ok', meta);
-
-        // Do not wait on client.end() — Zebra often never ACKs close.
-        killTimer = setTimeout(() => done(), PRINTER_DRAIN_MS);
-        try {
-          client.end();
-        } catch {
-          /* ignore */
-        }
-        setTimeout(() => {
-          if (!settled) {
-            log('WARN', 'forcing printer socket close', meta);
-            done();
-          }
-        }, PRINTER_SOCKET_KILL_MS);
+        // Resolve immediately — do not wait for client.end(); Zebra often never ACKs.
+        done();
       });
     });
 
@@ -276,8 +268,10 @@ async function handleRequest(req, res) {
     return;
   }
 
-  const printerIp = req.headers['x-printer-ip'] || DEFAULT_PRINTER_IP;
+  const printerIp = resolvePrinterIp(req.headers['x-printer-ip']);
   const requestId = nextRequestId++;
+
+  log('INFO', 'incoming POST /print', { requestId, printerIp, pid: process.pid });
 
   try {
     requestTimer.arm(HTTP_BODY_MS, 'read-body');

@@ -24,7 +24,7 @@ $StartScript = Join-Path $BridgeDir 'start-bridge.ps1'
 $ConfigPath = Join-Path $BridgeDir 'config.local.env'
 $LogDir = Join-Path $BridgeDir 'logs'
 $InstallLog = Join-Path $LogDir ("install-{0:yyyy-MM-dd-HHmmss}.log" -f (Get-Date))
-$DefaultPrinterIp = '172.18.129.132'
+$DefaultPrinterIp = '172.18.129.123'
 
 function Write-InstallLog {
   param(

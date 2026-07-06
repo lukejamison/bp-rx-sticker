@@ -3,7 +3,7 @@ const DEFAULTS = {
   hours: 168,
   mockPrint: true,
   enabled: true,
-  printerIp: '172.18.129.132',
+  printerIp: '172.18.129.123',
   printBridgeUrl: 'http://127.0.0.1:9101/print',
   printWidth: 203,
   labelLength: 203,
@@ -61,6 +61,10 @@ async function loadSettings() {
   if (settings.labelLength === 102) {
     settings.labelLength = DEFAULTS.labelLength;
     await chrome.storage.sync.set({ labelLength: settings.labelLength });
+  }
+  if (!settings.printerIp || settings.printerIp === '172.18.129.132') {
+    settings.printerIp = DEFAULTS.printerIp;
+    await chrome.storage.sync.set({ printerIp: settings.printerIp });
   }
   apiUrlInput.value = settings.apiUrl;
   hoursInput.value = settings.hours;

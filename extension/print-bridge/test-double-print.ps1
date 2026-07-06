@@ -1,25 +1,14 @@
 # Send two test prints back-to-back through the bridge (bypasses Chrome).
 # Run on DELIVERY01 after bridge restart:
 #   powershell -ExecutionPolicy Bypass -File test-double-print.ps1
-#   powershell -ExecutionPolicy Bypass -File test-double-print.ps1 -PrinterIp 172.18.129.123
 
 param(
-  [string]$PrinterIp = '',
   [string]$BridgeUrl = 'http://127.0.0.1:9101'
 )
 
 $ErrorActionPreference = 'Stop'
 $BridgeDir = $PSScriptRoot
-$ConfigPath = Join-Path $BridgeDir 'config.local.env'
-
-if (-not $PrinterIp -and (Test-Path $ConfigPath)) {
-  Get-Content $ConfigPath | ForEach-Object {
-    if ($_ -match '^\s*PRINTER_IP\s*=\s*(.+)\s*$') {
-      $PrinterIp = $Matches[1].Trim().Trim('"')
-    }
-  }
-}
-if (-not $PrinterIp) { $PrinterIp = '172.18.129.132' }
+$LogFile = Join-Path $BridgeDir ("logs\server-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
 
 $sampleZpl = @'
 ^XA
@@ -36,15 +25,16 @@ function Test-Health {
   $health = Invoke-RestMethod -Uri $url -TimeoutSec 5
   $health | ConvertTo-Json -Compress
   if (-not $health.ok) { throw 'Bridge health check failed' }
+  return $health
 }
 
-function Send-Print([int]$Attempt) {
+function Send-Print([int]$Attempt, [string]$PrinterIp) {
   $url = ($BridgeUrl.TrimEnd('/')) + '/print'
-  Write-Host "`n--- Print attempt $Attempt -> $PrinterIp ---"
+  Write-Host ""
+  Write-Host "--- Print attempt $Attempt (bridge -> $PrinterIp) ---"
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   try {
-    $result = Invoke-RestMethod -Method POST -Uri $url -Body $sampleZpl -ContentType 'text/plain' `
-      -Headers @{ 'X-Printer-IP' = $PrinterIp } -TimeoutSec 120
+    $result = Invoke-RestMethod -Method POST -Uri $url -Body $sampleZpl -ContentType 'text/plain' -TimeoutSec 120
     $sw.Stop()
     Write-Host "OK in $($sw.ElapsedMilliseconds)ms: $($result | ConvertTo-Json -Compress)"
   } catch {
@@ -55,11 +45,16 @@ function Send-Print([int]$Attempt) {
 }
 
 Write-Host "BP RX bridge double-print test"
-Write-Host "Printer IP: $PrinterIp"
-Write-Host "Log file: $(Join-Path $BridgeDir 'logs\server-' + (Get-Date -Format 'yyyy-MM-dd') + '.log')"
+Write-Host "Log file: $LogFile"
 
-Test-Health
-Send-Print -Attempt 1
+$health = Test-Health
+$printerIp = $health.printerIp
+Write-Host "Bridge printer IP: $printerIp"
+
+Send-Print -Attempt 1 -PrinterIp $printerIp
 Start-Sleep -Seconds 2
-Send-Print -Attempt 2
-Write-Host "`nDone. Check printer for TWO test labels."
+Send-Print -Attempt 2 -PrinterIp $printerIp
+Write-Host ""
+Write-Host "Done. Check printer for TWO test labels."
+Write-Host "Server log tail:"
+Get-Content $LogFile -Tail 20

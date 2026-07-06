@@ -67,7 +67,7 @@ Set in `config.local.env` (preferred on Windows) or shell env for manual runs:
 
 | Variable | Default |
 |----------|---------|
-| `PRINTER_IP` | `172.18.129.132` |
+| `PRINTER_IP` | `172.18.129.123` |
 | `PRINTER_PORT` | `9100` |
 | `PRINT_BRIDGE_PORT` | `9101` |
 | `PRINT_BRIDGE_HOST` | `127.0.0.1` |
