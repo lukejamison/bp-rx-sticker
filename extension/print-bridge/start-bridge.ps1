@@ -163,9 +163,7 @@ while ($true) {
   $run += 1
   Write-BridgeLog "Launching node server.js (run #$run) ..."
 
-  if ($run -gt 1 -or $exitCode -eq 2) {
-    Stop-StaleBridgeNodes
-  }
+  Stop-StaleBridgeNodes
 
   try {
     $process = Start-BridgeNodeProcess -NodeExe $nodeExe

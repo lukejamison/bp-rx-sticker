@@ -74,3 +74,8 @@ credentials/
 config.local.js
 extension/print-bridge/config.local.env
 extension/print-bridge/logs/
+
+# local logs
+logs/*.txt
+logs/*.log
+logs/

@@ -10,6 +10,10 @@ const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
+const PRINTER_CONNECT_MS = 5000;
+const PRINTER_WRITE_MS = 8000;
+const PRINTER_END_MS = 3000;
+const HTTP_REQUEST_MS = 20000;
 
 function log(level, message, meta) {
   const ts = new Date().toISOString();
@@ -22,40 +26,76 @@ function corsHeaders() {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Printer-IP',
+    Connection: 'close',
   };
+}
+
+/** One printer job at a time — Zebra raw TCP misbehaves with overlapping connections. */
+let printChain = Promise.resolve();
+
+function enqueuePrint(task) {
+  const run = printChain.then(task, task);
+  printChain = run.catch(() => {});
+  return run;
 }
 
 function sendZplToPrinter(printerIp, zpl) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let client = null;
+    let connectTimer = null;
+    let writeTimer = null;
+    let endTimer = null;
+
+    const cleanup = () => {
+      clearTimeout(connectTimer);
+      clearTimeout(writeTimer);
+      clearTimeout(endTimer);
+    };
+
     const done = (err) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      cleanup();
+      if (client) {
+        client.removeAllListeners();
+        client.destroy();
+        client = null;
+      }
       if (err) reject(err);
       else resolve();
     };
 
-    const client = net.createConnection({ host: printerIp, port: PRINTER_PORT }, () => {
+    connectTimer = setTimeout(() => {
+      done(new Error('Printer connection timed out'));
+    }, PRINTER_CONNECT_MS);
+
+    client = net.createConnection({ host: printerIp, port: PRINTER_PORT }, () => {
+      clearTimeout(connectTimer);
+      writeTimer = setTimeout(() => {
+        done(new Error('Printer write timed out'));
+      }, PRINTER_WRITE_MS);
+
       client.write(zpl, 'utf8', (writeErr) => {
+        clearTimeout(writeTimer);
         if (writeErr) {
-          client.destroy();
           done(writeErr);
           return;
         }
-        client.end(() => done());
+
+        endTimer = setTimeout(() => {
+          log('WARN', 'printer socket end timeout — assuming print delivered', { printerIp });
+          done();
+        }, PRINTER_END_MS);
+
+        client.end(() => {
+          clearTimeout(endTimer);
+          done();
+        });
       });
     });
 
-    const timer = setTimeout(() => {
-      client.destroy();
-      done(new Error('Printer connection timed out'));
-    }, 10000);
-
-    client.on('error', (err) => {
-      client.destroy();
-      done(err);
-    });
+    client.on('error', (err) => done(err));
   });
 }
 
@@ -68,7 +108,20 @@ function readBody(req) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  req.setTimeout(HTTP_REQUEST_MS, () => {
+    log('WARN', 'HTTP request timed out', { method: req.method, url: req.url });
+    if (!res.headersSent) {
+      res.writeHead(504, { ...corsHeaders(), 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Request timed out' }));
+    }
+    req.destroy();
+  });
+
+  void handleRequest(req, res);
+});
+
+async function handleRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, corsHeaders());
     res.end();
@@ -77,7 +130,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, printerIp: DEFAULT_PRINTER_IP, printerPort: PRINTER_PORT }));
+    res.end(JSON.stringify({
+      ok: true,
+      printerIp: DEFAULT_PRINTER_IP,
+      printerPort: PRINTER_PORT,
+      pid: process.pid,
+    }));
     return;
   }
 
@@ -97,16 +155,24 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    await sendZplToPrinter(printerIp, zpl);
+    log('INFO', 'print request', { printerIp, bytes: zpl.length, pid: process.pid });
+
+    await enqueuePrint(() => sendZplToPrinter(printerIp, zpl));
+
     log('INFO', 'print ok', { printerIp, bytes: zpl.length });
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length }));
   } catch (err) {
     log('ERROR', 'print failed', { printerIp, error: err.message });
-    res.writeHead(500, { ...corsHeaders(), 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: err.message, printerIp }));
+    if (!res.headersSent) {
+      res.writeHead(500, { ...corsHeaders(), 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: err.message, printerIp }));
+    }
   }
-});
+}
+
+server.keepAliveTimeout = 5000;
+server.headersTimeout = 10000;
 
 let listenRetries = 15;
 
@@ -138,7 +204,7 @@ server.on('error', (err) => {
 });
 
 process.on('uncaughtException', (err) => {
-  log('ERROR', 'uncaughtException (bridge keeps running)', { error: err.message, stack: err.stack });
+  log('ERROR', 'uncaughtException', { error: err.message, stack: err.stack });
 });
 
 process.on('unhandledRejection', (reason) => {
