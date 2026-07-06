@@ -18,21 +18,52 @@ Run **as Administrator** on the OneScan workstation:
 extension\print-bridge\install-windows.bat
 ```
 
-This registers a Scheduled Task `BP-RX-PrintBridge` that:
+With a specific printer IP (skips IP prompt):
 
-- Starts at user logon
-- Restarts up to 3 times if it crashes
-- Runs `node extension/print-bridge/server.js`
+```bat
+extension\print-bridge\install-windows.bat 172.18.129.200
+```
+
+Uninstall scheduled task:
+
+```bat
+extension\print-bridge\install-windows.bat uninstall
+```
+
+This registers scheduled task `BP-RX-PrintBridge` that:
+
+- Starts at user logon via `start-bridge.ps1`
+- Loads `config.local.env` (printer IP, ports)
+- Logs to `extension/print-bridge/logs/bridge-YYYY-MM-DD.log`
+- Restarts up to 3 times if it crashes (1 minute apart)
 
 Requires Node.js on PATH.
+
+### Change printer IP later
+
+1. Re-run `install-windows.bat` (interactive or pass IP), **or**
+2. Edit `config.local.env`, then restart the task:
+
+```powershell
+Restart-ScheduledTask -TaskName 'BP-RX-PrintBridge'
+```
+
+### Logs
+
+| File | Contents |
+|------|----------|
+| `logs/install-*.log` | Installer steps, task registration, health probe |
+| `logs/bridge-YYYY-MM-DD.log` | Bridge wrapper + Node stdout/stderr |
 
 ### Uninstall
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'BP-RX-PrintBridge' -Confirm:$false
+powershell -ExecutionPolicy Bypass -File extension/print-bridge/install-windows.ps1 -Uninstall
 ```
 
 ## Environment
+
+Set in `config.local.env` (preferred on Windows) or shell env for manual runs:
 
 | Variable | Default |
 |----------|---------|
@@ -41,7 +72,13 @@ Unregister-ScheduledTask -TaskName 'BP-RX-PrintBridge' -Confirm:$false
 | `PRINT_BRIDGE_PORT` | `9101` |
 | `PRINT_BRIDGE_HOST` | `127.0.0.1` |
 
+Copy `config.local.env.example` → `config.local.env` if installing manually.
+
 ## Endpoints
 
 - `GET /health` — bridge status
 - `POST /print` — ZPL body; optional header `X-Printer-IP`
+
+## Future: Windows monitor app
+
+Tray app for health, restart, and log upload: [`windows-monitor/README.md`](../../windows-monitor/README.md)

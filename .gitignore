@@ -72,3 +72,5 @@ credentials/
 
 # Local config overrides
 config.local.js
+extension/print-bridge/config.local.env
+extension/print-bridge/logs/

@@ -19,6 +19,18 @@ const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 
+function log(level, message, extra) {
+  const ts = new Date().toISOString();
+  const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
+  console.log(`[${ts}] [${level}] ${message}${suffix}`);
+}
+
+function log(level, message, meta) {
+  const ts = new Date().toISOString();
+  const suffix = meta ? ` ${JSON.stringify(meta)}` : '';
+  console.log(`[${ts}] [${level}] ${message}${suffix}`);
+}
+
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -60,6 +72,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/health') {
+    log('INFO', 'health check');
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, printerIp: DEFAULT_PRINTER_IP, printerPort: PRINTER_PORT }));
     return;
@@ -82,16 +95,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     await sendZplToPrinter(printerIp, zpl);
+    log('INFO', 'print ok', { printerIp, bytes: zpl.length });
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length }));
   } catch (err) {
+    log('ERROR', 'print failed', { printerIp, error: err.message });
     res.writeHead(500, { ...corsHeaders(), 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: err.message, printerIp }));
   }
 });
 
 server.listen(BRIDGE_PORT, BRIDGE_HOST, () => {
-  console.log(
-    `[BP-RX Print Bridge] http://${BRIDGE_HOST}:${BRIDGE_PORT}/print → ${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`
-  );
+  log('INFO', 'listening', {
+    bridge: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
+    printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
+  });
 });
