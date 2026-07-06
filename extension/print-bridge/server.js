@@ -8,13 +8,18 @@ const http = require('http');
 const net = require('net');
 const path = require('path');
 
-const BRIDGE_VERSION = '0.4.3';
+const BRIDGE_VERSION = '0.4.4';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
+/** Grace period to let the printer ACK our FIN before we force-close. Sending RST
+ * (via destroy() with no prior end()) instead of a clean FIN is what wedges Zebra's
+ * raw port-9100 service — it holds the connection slot until an internal timeout
+ * clears, which is why prints "work once, then time out" until the bridge restarts. */
+const PRINTER_CLOSE_GRACE_MS = 1500;
 const INTER_LABEL_MS = 350;
 const HTTP_BODY_MS = 30000;
 const HTTP_PRINT_BASE_MS = 120000;
@@ -175,24 +180,32 @@ function sendZplToPrinter(printerIp, zpl, meta) {
     let connectTimer = null;
     let writeTimer = null;
     let jobTimer = null;
+    let closeGraceTimer = null;
 
     const cleanup = () => {
       clearTimeout(connectTimer);
       clearTimeout(writeTimer);
       clearTimeout(jobTimer);
+      clearTimeout(closeGraceTimer);
+    };
+
+    // Force-close is a LAST resort, done a beat after we've already settled the
+    // promise — never before end() has had a chance to send a real FIN.
+    const forceCloseSocket = () => {
+      if (!client) return;
+      const c = client;
+      client = null;
+      c.removeAllListeners();
+      c.destroy();
     };
 
     const done = (err) => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (client) {
-        client.removeAllListeners();
-        client.destroy();
-        client = null;
-      }
       if (err) reject(err);
       else resolve();
+      setTimeout(forceCloseSocket, 50);
     };
 
     jobTimer = setTimeout(() => {
@@ -221,8 +234,19 @@ function sendZplToPrinter(printerIp, zpl, meta) {
         }
 
         log('INFO', 'printer write ok', meta);
-        // Resolve immediately — do not wait for client.end(); Zebra often never ACKs.
-        done();
+
+        // Drain any response bytes — unread data in the receive buffer at close time
+        // can itself force an RST even when we call end() cleanly.
+        client.on('data', () => {});
+
+        // Send a real FIN. Resolve as soon as the printer ACKs the close, or after a
+        // short grace period if it never does — but always attempt the clean close.
+        client.once('close', () => done());
+        client.end();
+        closeGraceTimer = setTimeout(() => {
+          log('INFO', 'printer close not acked in time — resolving anyway', meta);
+          done();
+        }, PRINTER_CLOSE_GRACE_MS);
       });
     });
 
