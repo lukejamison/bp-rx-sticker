@@ -12,13 +12,12 @@ const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.132';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
-const PRINTER_END_MS = 3000;
-const HTTP_REQUEST_MS = 20000;
+const PRINTER_DRAIN_MS = 500;
+const PRINTER_SOCKET_KILL_MS = 2500;
+const HTTP_BODY_MS = 30000;
+const HTTP_PRINT_BASE_MS = 90000;
 
-function httpTimeoutForZpl(zpl) {
-  const bytes = Buffer.byteLength(zpl, 'utf8');
-  return Math.min(120000, HTTP_REQUEST_MS + Math.ceil(bytes / 100));
-}
+let nextRequestId = 1;
 
 function log(level, message, meta) {
   const ts = new Date().toISOString();
@@ -35,37 +34,84 @@ function corsHeaders() {
   };
 }
 
-/** One printer job at a time — Zebra raw TCP misbehaves with overlapping connections. */
-let printChain = Promise.resolve();
+function createRequestTimer(req, res) {
+  let timer = null;
 
-function enqueuePrint(task) {
-  const run = printChain.then(task, task);
-  printChain = run.catch(() => {});
-  return run;
+  const clear = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    req.setTimeout(0);
+    req.removeAllListeners('timeout');
+  };
+
+  const arm = (ms, label) => {
+    clear();
+    timer = setTimeout(() => {
+      log('WARN', 'HTTP request timed out', { label, ms });
+      if (!res.headersSent) {
+        res.writeHead(504, { ...corsHeaders(), 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Print bridge request timed out' }));
+      }
+      req.destroy();
+    }, ms);
+  };
+
+  return { arm, clear };
+}
+
+function httpTimeoutForZpl(zpl) {
+  const bytes = Buffer.byteLength(zpl, 'utf8');
+  return Math.min(180000, HTTP_PRINT_BASE_MS + Math.ceil(bytes / 50));
 }
 
 function printTimeoutsForZpl(zpl) {
   const bytes = Buffer.byteLength(zpl, 'utf8');
   return {
     writeMs: Math.min(90000, PRINTER_WRITE_MS + Math.ceil(bytes / 150)),
-    endMs: Math.min(45000, PRINTER_END_MS + Math.ceil(bytes / 300)),
   };
 }
 
-function sendZplToPrinter(printerIp, zpl) {
-  const { writeMs, endMs } = printTimeoutsForZpl(zpl);
+/** One printer job at a time — Zebra raw TCP misbehaves with overlapping connections. */
+let printChain = Promise.resolve();
+let queueDepth = 0;
+
+function enqueuePrint(task, meta) {
+  queueDepth += 1;
+  const queuedAt = Date.now();
+  log('INFO', 'print queued', { ...meta, queueDepth });
+
+  const run = printChain
+    .then(async () => {
+      const waitMs = Date.now() - queuedAt;
+      if (waitMs > 500) {
+        log('INFO', 'print dequeue', { ...meta, waitMs, queueDepth });
+      }
+      return task();
+    })
+    .finally(() => {
+      queueDepth = Math.max(0, queueDepth - 1);
+    });
+
+  printChain = run.catch(() => {});
+  return run;
+}
+
+function sendZplToPrinter(printerIp, zpl, meta) {
+  const { writeMs } = printTimeoutsForZpl(zpl);
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let client = null;
     let connectTimer = null;
     let writeTimer = null;
-    let endTimer = null;
+    let killTimer = null;
 
     const cleanup = () => {
       clearTimeout(connectTimer);
       clearTimeout(writeTimer);
-      clearTimeout(endTimer);
+      clearTimeout(killTimer);
     };
 
     const done = (err) => {
@@ -98,15 +144,19 @@ function sendZplToPrinter(printerIp, zpl) {
           return;
         }
 
-        endTimer = setTimeout(() => {
-          log('WARN', 'printer socket end timeout — assuming print delivered', { printerIp, bytes: zpl.length });
-          done();
-        }, endMs);
-
-        client.end(() => {
-          clearTimeout(endTimer);
-          done();
-        });
+        // Do not wait on client.end() — Zebra often never ACKs close, which blocks the next job.
+        killTimer = setTimeout(() => done(), PRINTER_DRAIN_MS);
+        try {
+          client.end();
+        } catch {
+          /* ignore */
+        }
+        setTimeout(() => {
+          if (!settled && client) {
+            log('WARN', 'forcing printer socket close', meta);
+            done();
+          }
+        }, PRINTER_SOCKET_KILL_MS);
       });
     });
 
@@ -124,19 +174,12 @@ function readBody(req) {
 }
 
 const server = http.createServer((req, res) => {
-  req.setTimeout(HTTP_REQUEST_MS, () => {
-    log('WARN', 'HTTP request timed out (initial)', { method: req.method, url: req.url });
-    if (!res.headersSent) {
-      res.writeHead(504, { ...corsHeaders(), 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'Request timed out' }));
-    }
-    req.destroy();
-  });
-
   void handleRequest(req, res);
 });
 
 async function handleRequest(req, res) {
+  const requestTimer = createRequestTimer(req, res);
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, corsHeaders());
     res.end();
@@ -150,6 +193,7 @@ async function handleRequest(req, res) {
       printerIp: DEFAULT_PRINTER_IP,
       printerPort: PRINTER_PORT,
       pid: process.pid,
+      queueDepth,
     }));
     return;
   }
@@ -161,30 +205,36 @@ async function handleRequest(req, res) {
   }
 
   const printerIp = req.headers['x-printer-ip'] || DEFAULT_PRINTER_IP;
+  const requestId = nextRequestId++;
 
   try {
+    requestTimer.arm(HTTP_BODY_MS, 'read-body');
     const zpl = await readBody(req);
     if (!zpl.trim()) {
+      requestTimer.clear();
       res.writeHead(400, { ...corsHeaders(), 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'Empty ZPL body' }));
       return;
     }
 
-    req.setTimeout(httpTimeoutForZpl(zpl));
-
     const labelCount = (zpl.match(/\^XZ/g) || []).length || 1;
-    log('INFO', 'print request', { printerIp, bytes: zpl.length, labels: labelCount, pid: process.pid });
+    const meta = { requestId, printerIp, bytes: zpl.length, labels: labelCount, pid: process.pid };
 
-    await enqueuePrint(() => sendZplToPrinter(printerIp, zpl));
+    requestTimer.arm(httpTimeoutForZpl(zpl), 'print-job');
+    log('INFO', 'print request', meta);
 
-    log('INFO', 'print ok', { printerIp, bytes: zpl.length, labels: labelCount });
+    await enqueuePrint(() => sendZplToPrinter(printerIp, zpl, meta), meta);
+
+    requestTimer.clear();
+    log('INFO', 'print ok', meta);
     res.writeHead(200, { ...corsHeaders(), 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length }));
+    res.end(JSON.stringify({ ok: true, printerIp, bytes: zpl.length, labels: labelCount, requestId }));
   } catch (err) {
-    log('ERROR', 'print failed', { printerIp, error: err.message });
+    requestTimer.clear();
+    log('ERROR', 'print failed', { requestId, printerIp, error: err.message });
     if (!res.headersSent) {
       res.writeHead(500, { ...corsHeaders(), 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: err.message, printerIp }));
+      res.end(JSON.stringify({ ok: false, error: err.message, printerIp, requestId }));
     }
   }
 }

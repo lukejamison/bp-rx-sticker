@@ -6,7 +6,7 @@ async function printLabels(zpl, labelCount = 1) {
     return;
   }
 
-  throw new Error(result?.error || 'Print failed — is the print bridge running?');
+  throw new Error(result?.error || 'Print bridge failed — is the print bridge running?');
 }
 
 /** @deprecated use printLabels */

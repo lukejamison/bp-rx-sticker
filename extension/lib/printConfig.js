@@ -45,7 +45,7 @@ async function checkPrintBridgeHealth(settings) {
 async function printZplViaBridge(zpl, settings) {
   const url = (settings.printBridgeUrl || DEFAULT_PRINT_BRIDGE_URL).replace(/\/$/, '');
   const printUrl = url.endsWith('/print') ? url : `${url}/print`;
-  const timeoutMs = Math.min(120000, 20000 + zpl.length * 4);
+  const timeoutMs = Math.min(180000, 90000 + zpl.length * 4);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -68,7 +68,7 @@ async function printZplViaBridge(zpl, settings) {
     return data;
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error(`Print bridge timed out after ${Math.round(timeoutMs / 1000)}s`);
+      throw new Error(`Print bridge timed out after ${Math.round(timeoutMs / 1000)}s (not the invoice API)`);
     }
     throw err;
   } finally {
