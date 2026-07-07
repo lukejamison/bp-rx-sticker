@@ -164,7 +164,51 @@ async function processScan(raw, meta = {}) {
   return payload;
 }
 
+function buildCompletionPayload(result) {
+  const item = result?.item || {};
+  const invoice = result?.invoice || {};
+  return {
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    itemId: item.itemId,
+    ndc: item.ndc,
+    upc: result?.parsed?.upc || result?.matchedCode || item.upc,
+    itemName: item.itemName,
+    supplierName: item.supplier,
+    invoiceDate: invoice.invoiceDate,
+    statusChangedOn: invoice.statusChangedOn,
+    cost: item.cost,
+    quantity: result?.labelCount ?? resolveLabelCount(item),
+    stockSize: item.stockSize,
+    strength: item.strength,
+    deviceId: (typeof navigator !== 'undefined' && navigator.userAgent) || 'bp-rx-extension',
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'MARK_COMPLETED') {
+    (async () => {
+      try {
+        const payload = buildCompletionPayload(message.result);
+        if (!payload.invoiceId || !payload.ndc || !payload.upc) {
+          warn('MARK_COMPLETED skipped — missing required fields', payload);
+          sendResponse({ ok: false, error: 'Missing invoiceId/ndc/upc' });
+          return;
+        }
+        const settings = await getSettings();
+        const data = await markCompleted(settings.apiUrl, payload);
+        log('MARK_COMPLETED ok', { itemName: payload.itemName, ...data });
+        sendResponse({ ok: true, ...data });
+      } catch (err) {
+        // Non-fatal — the label already printed. This only affects whether the
+        // *next* scan of this item gets recognized as already handled.
+        warn('MARK_COMPLETED failed (non-blocking)', err.message);
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === 'PRINT_ZPL') {
     const labelCount = message.labelCount || 1;
     const printStart = Date.now();

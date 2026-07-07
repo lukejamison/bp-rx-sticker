@@ -137,6 +137,16 @@ async function maybePrintLabels(result, parsedHint) {
     );
     await printLabels(zpl, labelCount);
     result.printed = true;
+
+    // Best-effort: mark this invoice line item completed so a later scan of
+    // another physical unit of the *same* product (same NDC on this invoice)
+    // is recognized as already handled instead of re-printing the full
+    // labelCount again. A failure here doesn't affect the print that already
+    // succeeded -- it only means the next scan might print again too.
+    chrome.runtime.sendMessage({ type: 'MARK_COMPLETED', result }).catch((err) => {
+      BP_RX.warn('Mark completed failed (non-blocking)', err?.message || err);
+    });
+
     return { printMs: Date.now() - printStart, labelCount };
   } finally {
     printInFlight = false;

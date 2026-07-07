@@ -103,6 +103,34 @@ async function lookupWithCandidates(codes, settings) {
   throw notFound;
 }
 
+/**
+ * Marks an invoice line item as completed after a real (non-mock) print, so
+ * later scans of the *same* NDC/UPC on the *same* invoice (e.g. re-scanning
+ * additional serialized units of a multi-quantity line) are recognized as
+ * already handled instead of re-printing the full invoiceQty again.
+ * Mirrors the PWA's `markCompleted` call against the same `/api/completed`
+ * endpoint/table, so completion is shared across both clients.
+ */
+async function markCompleted(apiUrl, data) {
+  const url = `${apiUrl.replace(/\/$/, '')}/api/completed`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const error = new Error(body.error || body.message || `Mark completed failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return body;
+}
+
 if (typeof self !== 'undefined') {
   self.DEFAULT_API_URL = DEFAULT_API_URL;
   self.WEEKEND_HOURS = WEEKEND_HOURS;
@@ -111,4 +139,5 @@ if (typeof self !== 'undefined') {
   self.getSettings = getSettings;
   self.lookupBarcode = lookupBarcode;
   self.lookupWithCandidates = lookupWithCandidates;
+  self.markCompleted = markCompleted;
 }
