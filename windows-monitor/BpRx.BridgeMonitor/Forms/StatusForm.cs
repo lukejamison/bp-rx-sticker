@@ -28,6 +28,8 @@ public sealed class StatusForm : Form
         MaximizeBox = false;
         MinimizeBox = true;
         ShowInTaskbar = true;
+        var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (exeIcon is not null) Icon = exeIcon;
 
         var settings = coordinator.Settings;
         _logDirBox.Text = settings.BridgeLogDirectory;
