@@ -79,6 +79,13 @@ Copy `config.local.env.example` → `config.local.env` if installing manually.
 - `GET /health` — bridge status
 - `POST /print` — ZPL body; optional header `X-Printer-IP`
 
-## Future: Windows monitor app
+## Windows monitor app
 
 Tray app for health, restart, and log upload: [`windows-monitor/README.md`](../../windows-monitor/README.md)
+
+## Something broken?
+
+- [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) — architecture overview, root
+  causes of past incidents (printer TCP RST/FIN wedging, the EPIPE crash-loop
+  bug), the full script toolkit, and a step-by-step runbook.
+- [`CHANGELOG.md`](./CHANGELOG.md) — version-by-version history of the bridge.
