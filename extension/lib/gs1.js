@@ -10,6 +10,14 @@ const FIXED_LENGTH_AIS = {
   '17': 6,
 };
 
+// Per GS1 General Specifications, these variable-length AIs are
+// self-terminating once they reach their maximum length — no FNC1
+// separator is required in that case.
+const VARIABLE_LENGTH_MAX_AIS = {
+  '10': 20, // Batch/Lot number
+  '21': 20, // Serial number
+};
+
 function parseHumanReadable(raw) {
   const result = { raw, gtin: null, expiry: null, lot: null, serial: null, lookupCodes: [] };
   const re = /\((\d{2})\)([^(]*)/g;
@@ -26,8 +34,11 @@ function parseHumanReadable(raw) {
 }
 
 function parseFnc1(raw) {
-  const normalized = raw.replace(new RegExp(FNC1, 'g'), FNC1);
-  return parseConcatenated(normalized.split(FNC1).join(''));
+  // Keep the actual FNC1 separators in place — parseConcatenated() uses
+  // them as the authoritative terminator for variable-length fields.
+  // (Previously this stripped FNC1 and rejoined the string, which threw
+  // away the exact boundary information the separator exists to provide.)
+  return parseConcatenated(raw);
 }
 
 function parseConcatenated(raw) {
@@ -35,6 +46,11 @@ function parseConcatenated(raw) {
   let i = 0;
 
   while (i < raw.length) {
+    if (raw[i] === FNC1) {
+      i += 1;
+      continue;
+    }
+
     if (!/\d/.test(raw[i])) {
       i += 1;
       continue;
@@ -52,15 +68,20 @@ function parseConcatenated(raw) {
       continue;
     }
 
-    if (ai === '10' || ai === '21') {
+    if (VARIABLE_LENGTH_MAX_AIS[ai]) {
+      // Terminate on an explicit FNC1 separator when present. Otherwise,
+      // per GS1 General Specifications, a variable-length field that is
+      // not immediately followed by FNC1 must be read up to its defined
+      // maximum length (it's "self-terminating" at that point). We
+      // deliberately do NOT guess a boundary by looking for something
+      // that merely resembles another AI — real serial/lot values are
+      // often numeric and can coincidentally contain digit pairs like
+      // "01" or "21", which caused false early termination.
+      const maxLen = VARIABLE_LENGTH_MAX_AIS[ai];
       let value = '';
-      while (i < raw.length) {
-        const nextAi = raw.slice(i, i + 2);
-        if (
-          (nextAi === '01' || nextAi === '17' || nextAi === '10' || nextAi === '21') &&
-          /^\d{2}$/.test(nextAi) &&
-          value.length > 0
-        ) {
+      while (i < raw.length && value.length < maxLen) {
+        if (raw[i] === FNC1) {
+          i += 1;
           break;
         }
         value += raw[i];
