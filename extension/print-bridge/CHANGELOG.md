@@ -8,6 +8,21 @@ fixes — this file is just the terse "what changed" log.
 Bridge version shown here matches `BRIDGE_VERSION` in `server.js` and the response
 from `GET /health`.
 
+## [0.4.6] - 2026-07-07
+
+### Added — optional Better Stack (Logtail) alerting
+
+- Every `WARN`/`ERROR` the bridge logs (printer errors, timeouts, crashes) is
+  now also sent to Better Stack in real time when `BETTERSTACK_SOURCE_TOKEN`
+  and `BETTERSTACK_INGESTING_HOST` are set in `config.local.env`. Leave both
+  blank to disable — the bridge behaves exactly as before.
+- A single `INFO` "print bridge started" event fires on every startup as a
+  built-in connectivity self-test — restart the task and watch for it in the
+  Better Stack dashboard to confirm the integration is wired up.
+- Fire-and-forget over HTTPS with a 5s timeout; a Better Stack outage or
+  misconfiguration can never affect printing, and failures are never routed
+  back through `log()` (would loop).
+
 ## [0.4.5] - 2026-07-06
 
 ### Fixed — CRITICAL: bridge process crash on broken stdout pipe (EPIPE)

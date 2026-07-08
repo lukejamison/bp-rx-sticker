@@ -51,7 +51,8 @@ function Import-BridgeEnvFile {
     }
 
     Set-Item -Path "Env:$key" -Value $value
-    Write-BridgeLog "  $key=$value"
+    $logValue = if ($key -match 'TOKEN|SECRET|PASSWORD') { '***' } else { $value }
+    Write-BridgeLog "  $key=$logValue"
   }
 }
 
@@ -117,7 +118,7 @@ function Start-BridgeNodeProcess {
   $psi.RedirectStandardError = $true
   $psi.CreateNoWindow = $true
 
-  foreach ($key in @('PRINTER_IP', 'PRINTER_PORT', 'PRINT_BRIDGE_HOST', 'PRINT_BRIDGE_PORT')) {
+  foreach ($key in @('PRINTER_IP', 'PRINTER_PORT', 'PRINT_BRIDGE_HOST', 'PRINT_BRIDGE_PORT', 'BETTERSTACK_SOURCE_TOKEN', 'BETTERSTACK_INGESTING_HOST')) {
     $value = [Environment]::GetEnvironmentVariable($key)
     if ($value) {
       $psi.EnvironmentVariables[$key] = $value

@@ -54,6 +54,24 @@
       </section>
 
       <section>
+        <h2>Alerting</h2>
+        <label>
+          Better Stack source token
+          <input id="betterStackToken" type="password" spellcheck="false" placeholder="Paste source token…" />
+        </label>
+        <label>
+          Better Stack ingesting host
+          <input id="betterStackHost" type="text" spellcheck="false" placeholder="e.g. s12345.betterstackdata.com" />
+        </label>
+        <p class="hint">
+          Optional — sends warnings/errors (print failures, lookup failures) to Better Stack in real time. Leave
+          blank to disable. Get both values from your Better Stack source's <strong>Configure</strong> page.
+        </p>
+        <button id="testBetterStack" type="button" class="secondary">Send test alert</button>
+        <p id="betterStackStatus" class="status" aria-live="polite"></p>
+      </section>
+
+      <section>
         <h2>Diagnostics</h2>
         <button id="save" type="button">Save settings</button>
         <button id="ping" type="button" class="secondary">Check OneScan connection</button>

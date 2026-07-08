@@ -7,6 +7,8 @@ const DEFAULTS = {
   printBridgeUrl: 'http://127.0.0.1:9101/print',
   printWidth: 203,
   labelLength: 203,
+  betterStackToken: '',
+  betterStackHost: '',
 };
 
 const apiUrlInput = document.getElementById('apiUrl');
@@ -15,6 +17,10 @@ const enabledInput = document.getElementById('enabled');
 const mockPrintInput = document.getElementById('mockPrint');
 const printerIpInput = document.getElementById('printerIp');
 const printBridgeUrlInput = document.getElementById('printBridgeUrl');
+const betterStackTokenInput = document.getElementById('betterStackToken');
+const betterStackHostInput = document.getElementById('betterStackHost');
+const testBetterStackButton = document.getElementById('testBetterStack');
+const betterStackStatus = document.getElementById('betterStackStatus');
 const saveButton = document.getElementById('save');
 const pingButton = document.getElementById('ping');
 const testScanButton = document.getElementById('testScan');
@@ -72,6 +78,8 @@ async function loadSettings() {
   mockPrintInput.checked = settings.mockPrint;
   printerIpInput.value = settings.printerIp || DEFAULTS.printerIp;
   printBridgeUrlInput.value = settings.printBridgeUrl || DEFAULTS.printBridgeUrl;
+  betterStackTokenInput.value = settings.betterStackToken || '';
+  betterStackHostInput.value = settings.betterStackHost || '';
   updateHoursHint();
 }
 
@@ -89,6 +97,8 @@ saveButton.addEventListener('click', async () => {
     mockPrint: mockPrintInput.checked,
     printerIp: printerIpInput.value.trim() || DEFAULTS.printerIp,
     printBridgeUrl: printBridgeUrlInput.value.trim() || DEFAULTS.printBridgeUrl,
+    betterStackToken: betterStackTokenInput.value.trim(),
+    betterStackHost: betterStackHostInput.value.trim(),
   });
 
   saveStatus.textContent = 'Saved.';
@@ -213,6 +223,26 @@ testPrintButton.addEventListener('click', async () => {
     }
   } catch (err) {
     connectionStatus.textContent = `Print error — ${err.message}. Is print bridge running?`;
+  }
+});
+
+testBetterStackButton.addEventListener('click', async () => {
+  if (!betterStackTokenInput.value.trim() || !betterStackHostInput.value.trim()) {
+    betterStackStatus.textContent = 'Enter both fields and Save settings first.';
+    return;
+  }
+  betterStackStatus.textContent = 'Saving and sending test alert…';
+  await chrome.storage.sync.set({
+    betterStackToken: betterStackTokenInput.value.trim(),
+    betterStackHost: betterStackHostInput.value.trim(),
+  });
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'TEST_BETTERSTACK' });
+    betterStackStatus.textContent = result?.ok
+      ? 'Sent — check your Better Stack dashboard for "Test alert from BP RX Sticker options page".'
+      : `Failed — ${result?.error || 'unknown error'}`;
+  } catch (err) {
+    betterStackStatus.textContent = `Failed — ${err.message}`;
   }
 });
 

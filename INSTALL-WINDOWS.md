@@ -2,6 +2,10 @@
 
 OneScan workstation only. Do these in order.
 
+> Already installed and just shipping a code update? See
+> [`UPDATE_PROCEDURE.md`](./UPDATE_PROCEDURE.md) instead — this doc is for a
+> brand-new workstation.
+
 ## Before you start
 
 - [ ] Windows 10/11 PC on the pharmacy network

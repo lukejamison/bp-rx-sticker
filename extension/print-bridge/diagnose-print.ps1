@@ -80,8 +80,8 @@ try {
   }
   if (-not $health.bridgeVersion) {
     Write-Report 'WARN: bridgeVersion missing - old server.js. git pull then reset-bridge.ps1'
-  } elseif ($health.bridgeVersion -ne '0.4.5') {
-    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.5 - git pull then reset-bridge.ps1"
+  } elseif ($health.bridgeVersion -ne '0.4.6') {
+    Write-Report "WARN: bridgeVersion=$($health.bridgeVersion) expected 0.4.6 - git pull then reset-bridge.ps1"
   }
   $printerIp = $health.printerIp
 } catch {

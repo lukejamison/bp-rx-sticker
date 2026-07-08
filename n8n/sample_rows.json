@@ -1,0 +1,51 @@
+[
+    {
+      "InvoiceNumber": "3241505055",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{99b2b341-25af-42c8-951f-8e4e8ecc96df,3241505055::ABC}",
+      "internal_ids": "{e7477038-9505-41fd-b04d-da5436bd97f0,437f2e18-7c38-4e4b-8ddf-4986321ee628}"
+    },
+    {
+      "InvoiceNumber": "3241505057",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{ed60b7b0-bfda-4480-bf69-857945a4f837,3241505057::ABC}",
+      "internal_ids": "{fc00a03e-3425-448f-a770-4ebe9f21eca2,161c1202-ae47-486a-8e5e-414d25750e39}"
+    },
+    {
+      "InvoiceNumber": "3241505056",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{315f64b9-aba3-4bd4-8963-38ec2aa6a5e8,3241505056::ABC}",
+      "internal_ids": "{88b82905-a071-4614-bd93-fc42df86c1bc,a5f11a30-9e8d-449b-8cfc-8d1e9e8eea66}"
+    },
+    {
+      "InvoiceNumber": "3241502325",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{2f068cf3-6913-49e2-9bed-7ec56fa5a43e,3241502325::ABC}",
+      "internal_ids": "{be0b692a-f91b-48ed-82a6-828894cda646,f2c7d1a2-4a44-449e-82fb-cd7ccede173f}"
+    },
+    {
+      "InvoiceNumber": "11194035",
+      "SupplierName": "IPCRx",
+      "row_count": 2,
+      "invoice_ids": "{b3672823-605e-4cfd-9619-45f733168289,11194035::IPCRX}",
+      "internal_ids": "{eaa608c4-d1de-4ec9-9dee-76299c4609cd,b21f9cfc-0461-4202-b3cb-d31c799ebb6c}"
+    },
+    {
+      "InvoiceNumber": "3241497443",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{e4d6e599-d5ff-4a9e-a18d-3b64ba4fa582,3241497443::ABC}",
+      "internal_ids": "{02c7b95b-6be3-4212-82a8-3ebfc98c4987,1298079b-d536-45ff-8cb5-f5903d6497c9}"
+    },
+    {
+      "InvoiceNumber": "3241499533",
+      "SupplierName": "ABC",
+      "row_count": 2,
+      "invoice_ids": "{8f0e9592-fcbc-4dfe-9b35-853606ec5087,3241499533::ABC}",
+      "internal_ids": "{64797b1d-8927-4505-846d-17306fb414c0,25f83811-9aca-485d-b1f7-699ccf257243}"
+    }
+  ]

@@ -1,4 +1,4 @@
-importScripts('lib/gs1.js', 'lib/api.js', 'lib/printConfig.js', 'lib/zpl.js');
+importScripts('lib/gs1.js', 'lib/api.js', 'lib/printConfig.js', 'lib/zpl.js', 'lib/betterstack.js');
 
 const LOG_PREFIX = '[BP-RX Sticker BG]';
 const TARGET_HASH = '#/ssccScanIn';
@@ -10,7 +10,24 @@ function log(...args) {
 
 function warn(...args) {
   console.warn(LOG_PREFIX, ...args);
+  const [message, ...rest] = args;
+  sendToBetterStack('WARN', message, rest.length ? { details: rest } : undefined);
 }
+
+// Catches service-worker-level crashes that never go through warn() above --
+// mirrors the print bridge's uncaughtException/unhandledRejection handlers.
+self.addEventListener('error', (event) => {
+  sendToBetterStack('ERROR', event.message || 'Uncaught error in background worker', {
+    filename: event.filename,
+    lineno: event.lineno,
+  });
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  sendToBetterStack('ERROR', 'Unhandled rejection in background worker', {
+    reason: event.reason instanceof Error ? event.reason.message : String(event.reason),
+  });
+});
 
 let lastScanKey = '';
 let lastScanAt = 0;
@@ -186,6 +203,21 @@ function buildCompletionPayload(result) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'REMOTE_LOG') {
+    sendToBetterStack(message.level || 'WARN', message.message, {
+      source: 'content-script',
+      ...message.context,
+    });
+    return false;
+  }
+
+  if (message?.type === 'TEST_BETTERSTACK') {
+    sendToBetterStack('INFO', 'Test alert from BP RX Sticker options page', { test: true }).then(
+      (result) => sendResponse(result.sent ? { ok: true } : { ok: false, error: result.reason })
+    );
+    return true;
+  }
+
   if (message?.type === 'MARK_COMPLETED') {
     (async () => {
       try {

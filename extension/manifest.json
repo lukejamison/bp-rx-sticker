@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BP RX Sticker — OneScan Bridge",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "On SSCC Scan In only: one barcode scan prints one invoice label.",
   "options_page": "options/options.html",
   "permissions": ["storage", "tabs"],
@@ -11,7 +11,8 @@
     "http://localhost:3000/*",
     "http://127.0.0.1:9101/*",
     "http://localhost:9101/*",
-    "http://*/*"
+    "http://*/*",
+    "https://*.betterstackdata.com/*"
   ],
   "background": {
     "service_worker": "background.js"

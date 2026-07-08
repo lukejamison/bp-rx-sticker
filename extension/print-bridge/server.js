@@ -5,14 +5,23 @@
 
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 
-const BRIDGE_VERSION = '0.4.5';
+const BRIDGE_VERSION = '0.4.6';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
 const PRINTER_PORT = Number(process.env.PRINTER_PORT || 9100);
+// Optional: Better Stack (Logtail) alerting. Leave both blank to disable --
+// every log() call becomes a silent no-op for this part. Get these from your
+// Better Stack source's "Configure" page (Source token + Ingesting host).
+const BETTERSTACK_SOURCE_TOKEN = process.env.BETTERSTACK_SOURCE_TOKEN || '';
+const BETTERSTACK_INGESTING_HOST = (process.env.BETTERSTACK_INGESTING_HOST || '')
+  .replace(/^https?:\/\//, '')
+  .replace(/\/$/, '');
 const PRINTER_CONNECT_MS = 5000;
 const PRINTER_WRITE_MS = 8000;
 /** Grace period to let the printer ACK our FIN before we force-close. Sending RST
@@ -49,9 +58,55 @@ process.stdout.on('error', (err) => {
   }
 });
 
+// Fire-and-forget alert to Better Stack for WARN/ERROR events (and the one INFO
+// startup event below, which doubles as a connectivity self-test). Never lets a
+// Better Stack outage affect printing, and never routes its own failures back
+// through log() -- that would loop.
+function sendToBetterStack(level, message, meta) {
+  if (!BETTERSTACK_SOURCE_TOKEN || !BETTERSTACK_INGESTING_HOST) return;
+
+  let payload;
+  try {
+    payload = JSON.stringify({
+      dt: new Date().toISOString(),
+      level,
+      message,
+      service: 'print-bridge',
+      bridgeVersion: BRIDGE_VERSION,
+      host: os.hostname(),
+      pid: process.pid,
+      ...meta,
+    });
+  } catch {
+    return;
+  }
+
+  const req = https.request(
+    {
+      hostname: BETTERSTACK_INGESTING_HOST,
+      port: 443,
+      path: '/',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        Authorization: `Bearer ${BETTERSTACK_SOURCE_TOKEN}`,
+      },
+      timeout: 5000,
+    },
+    (res) => res.resume()
+  );
+  req.on('error', () => {});
+  req.on('timeout', () => req.destroy());
+  req.end(payload);
+}
+
 function log(level, message, meta) {
   const line = `[${new Date().toISOString()}] [${level}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}`;
   fs.appendFile(LOG_PATH, `${line}\n`, () => {});
+  if (level === 'WARN' || level === 'ERROR') {
+    sendToBetterStack(level, message, meta);
+  }
   if (stdoutBroken) return;
   try {
     console.log(line);
@@ -391,6 +446,12 @@ function tryListen() {
       printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
       pid: process.pid,
       logFile: LOG_PATH,
+    });
+    // Startup event always fires (not just WARN/ERROR) so configuring Better
+    // Stack gives an immediate, easy way to confirm it's wired up correctly --
+    // restart the bridge and watch for this line in the Better Stack dashboard.
+    sendToBetterStack('INFO', 'print bridge started', {
+      printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
     });
   });
 }

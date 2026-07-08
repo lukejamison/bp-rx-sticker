@@ -14,6 +14,27 @@ const BP_RX = {
 
   warn(...args) {
     console.warn(this.LOG_PREFIX, ...args);
+    this.reportIssue(args);
+  },
+
+  // Fire-and-forget relay to the background worker, which forwards to Better
+  // Stack if configured. Content scripts can't reach Better Stack directly
+  // without their own host permission, so everything routes through here.
+  reportIssue(args) {
+    if (!this.hasRuntime()) return;
+    const [message, ...rest] = args;
+    try {
+      chrome.runtime
+        .sendMessage({
+          type: 'REMOTE_LOG',
+          level: 'WARN',
+          message: String(message ?? ''),
+          context: rest.length ? { details: rest } : undefined,
+        })
+        .catch(() => {});
+    } catch {
+      // Extension context invalidated (e.g. mid-reload) -- ignore.
+    }
   },
 
   hasRuntime() {
