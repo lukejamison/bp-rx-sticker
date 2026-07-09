@@ -88,7 +88,7 @@
       observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    window.addEventListener('hashchange', scan);
+    window.addEventListener('hashchange', () => scan());
   }
 
   if (document.readyState === 'loading') {
