@@ -134,6 +134,36 @@ function gtinToUpc12(gtin) {
   return gtin14.slice(-12);
 }
 
+/**
+ * Extract the 10-digit "short" NDC from a 12-digit UPC-A code.
+ * Pharma UPC-A codes are built as "3" + NDC10 + a standard UPC-A check
+ * digit (this is the same check digit GTIN-14 ends up carrying, since the
+ * "00" GTIN packaging prefix contributes nothing to the weighted checksum).
+ * Returns null when the UPC doesn't carry the "3" NDC indicator digit.
+ */
+function upc12ToNdc10(upc12) {
+  if (!upc12 || upc12.length !== 12 || upc12[0] !== '3') return null;
+  return upc12.slice(1, 11);
+}
+
+/**
+ * A bare 10-digit NDC is ambiguous — it can come from any of three
+ * labeler-product-package segment formats (4-4-2, 5-3-2, or 5-4-1), and
+ * each normalizes to a different 11-digit NDC depending on which segment
+ * absorbs the padding zero. PioneerRx (and most pharmacy systems) store
+ * the 11-digit form, so we generate all three candidates and let the
+ * lookup try each — only one will actually match, but we don't know
+ * which segment format a given labeler uses ahead of time.
+ */
+function ndc10To11Variants(ndc10) {
+  if (!ndc10 || ndc10.length !== 10) return [];
+  return [
+    `0${ndc10}`, // 4-4-2 -> 5-4-2 (pad labeler segment)
+    `${ndc10.slice(0, 5)}0${ndc10.slice(5)}`, // 5-3-2 -> 5-4-2 (pad product segment)
+    `${ndc10.slice(0, 9)}0${ndc10.slice(9)}`, // 5-4-1 -> 5-4-2 (pad package segment)
+  ];
+}
+
 function gtinToLookupCandidates(gtin) {
   const ordered = [];
   const seen = new Set();
@@ -156,6 +186,17 @@ function gtinToLookupCandidates(gtin) {
   add(digits);
   add(gtin14.slice(1, 13));
   if (upc12) add(`0${upc12}`);
+
+  // Fall back to NDC-based matching. Pioneer's stored "UPC" field is
+  // sometimes blank or carries a bad check digit (it's not always a real,
+  // independently-verified UPC-A for Rx-only drugs), but the NDC field is
+  // reliable — so once UPC candidates are exhausted, try the NDC derived
+  // from the same GTIN in all three possible 11-digit paddings.
+  const ndc10 = upc12ToNdc10(upc12);
+  if (ndc10) {
+    add(ndc10);
+    ndc10To11Variants(ndc10).forEach(add);
+  }
 
   return ordered;
 }
@@ -227,5 +268,7 @@ function parseGs1Barcode(raw) {
 if (typeof self !== 'undefined') {
   self.parseGs1Barcode = parseGs1Barcode;
   self.gtinToUpc12 = gtinToUpc12;
+  self.upc12ToNdc10 = upc12ToNdc10;
+  self.ndc10To11Variants = ndc10To11Variants;
   self.gtinToLookupCandidates = gtinToLookupCandidates;
 }

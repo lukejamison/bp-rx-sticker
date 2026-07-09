@@ -339,16 +339,14 @@ function startGracePeriod() {
 function checkForNewScan(source) {
   if (!isActive) return;
 
-  // Diagnostics only below (does NOT change which items trigger a lookup/print) --
-  // LABELS_SELECTOR includes a loose ".labels-area" fallback alongside the
-  // stricter ".item-container.scanned .labels-area". If OneScan ever bulk-renders
-  // a whole order's line items into the DOM from a single physical scan (before
-  // marking most of them ".scanned"), that loose fallback could theoretically
-  // treat every item in the order as "newly scanned". We haven't been able to
-  // confirm this happens, so behavior is unchanged for now -- but we log a
-  // flag per item plus a batch-level warning so a real occurrence shows up
-  // clearly here and in Better Stack (if configured) instead of only as
-  // secondhand user feedback.
+  // Confirmed in production logs (2026-07-09): a single physical scan can
+  // cause OneScan to bulk-render an entire order's line items into the DOM
+  // at once, before most of them are marked ".scanned". LABELS_SELECTOR now
+  // requires ".item-container.scanned" so those un-scanned items can no
+  // longer match at all -- `strictMatch` below is a defensive sanity check
+  // (should always be true now) rather than the primary guard. Kept, along
+  // with the batch-size warning, as an early-warning tripwire in case
+  // OneScan's markup ever changes in a way that reopens this gap.
   const newItemsThisCheck = [];
 
   document.querySelectorAll(BP_RX.LABELS_SELECTOR).forEach((el) => {
@@ -396,8 +394,7 @@ function scheduleDomCheck(source) {
 function nodeHasScanResult(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
   return (
-    node.matches?.('.labels-area, .item-container.scanned') ||
-    !!node.querySelector?.('.labels-area, .item-container.scanned')
+    node.matches?.('.item-container.scanned') || !!node.querySelector?.('.item-container.scanned')
   );
 }
 
