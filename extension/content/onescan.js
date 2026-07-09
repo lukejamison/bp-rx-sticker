@@ -339,6 +339,18 @@ function startGracePeriod() {
 function checkForNewScan(source) {
   if (!isActive) return;
 
+  // Diagnostics only below (does NOT change which items trigger a lookup/print) --
+  // LABELS_SELECTOR includes a loose ".labels-area" fallback alongside the
+  // stricter ".item-container.scanned .labels-area". If OneScan ever bulk-renders
+  // a whole order's line items into the DOM from a single physical scan (before
+  // marking most of them ".scanned"), that loose fallback could theoretically
+  // treat every item in the order as "newly scanned". We haven't been able to
+  // confirm this happens, so behavior is unchanged for now -- but we log a
+  // flag per item plus a batch-level warning so a real occurrence shows up
+  // clearly here and in Better Stack (if configured) instead of only as
+  // secondhand user feedback.
+  const newItemsThisCheck = [];
+
   document.querySelectorAll(BP_RX.LABELS_SELECTOR).forEach((el) => {
     const parsed = parseOneScanLabel(el.textContent);
     if (!parsed?.gtin) return;
@@ -348,14 +360,32 @@ function checkForNewScan(source) {
 
     seenLabels.add(key);
 
+    const strictMatch = !!el.closest('.item-container.scanned');
+    newItemsThisCheck.push({ gtin: parsed.gtin, strictMatch });
+
     if (isGracePeriod()) {
-      BP_RX.log('New item during grace — seeded only', { gtin: parsed.gtin });
+      BP_RX.log('New item during grace — seeded only', { gtin: parsed.gtin, strictMatch });
       return;
     }
 
-    BP_RX.log('New scan detected (OneScan added item)', { source, gtin: parsed.gtin });
+    if (!strictMatch) {
+      BP_RX.warn(
+        'New scan matched via loose ".labels-area" fallback (no .item-container.scanned ancestor) — possible bulk DOM injection, not a real scan',
+        { source, gtin: parsed.gtin, textPreview: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) }
+      );
+    }
+
+    BP_RX.log('New scan detected (OneScan added item)', { source, gtin: parsed.gtin, strictMatch });
     sendScanFn(parsed.gtin, 'scan:dom-new', parsed);
   });
+
+  if (newItemsThisCheck.length > 1) {
+    BP_RX.warn('Multiple new items detected in a single DOM check — possible bulk order pull-in from one scan', {
+      source,
+      count: newItemsThisCheck.length,
+      items: newItemsThisCheck,
+    });
+  }
 }
 
 function scheduleDomCheck(source) {
