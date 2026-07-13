@@ -1,5 +1,5 @@
-async function printLabels(zpl, labelCount = 1) {
-  const result = await chrome.runtime.sendMessage({ type: 'PRINT_ZPL', zpl, labelCount });
+async function printLabels(zpl, labelCount = 1, meta = null) {
+  const result = await chrome.runtime.sendMessage({ type: 'PRINT_ZPL', zpl, labelCount, meta });
 
   if (result?.ok) {
     BP_RX.log('Printed via network', { ...result, labelCount });

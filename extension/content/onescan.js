@@ -14,6 +14,13 @@ let domCheckTimer = null;
 let hasShownActiveToast = false;
 let bridgeWarningShown = false;
 let gracePeriodEnds = 0;
+// Ground truth for "what was actually scanned" -- set only from the real
+// barcode input field (never from the DOM watcher itself). Used to gate
+// which of possibly-several newly-".scanned" DOM items actually get looked
+// up/printed. See checkForNewScan().
+let lastScannedBarcode = '';
+let lastScannedBarcodeAt = 0;
+const RECENT_PHYSICAL_SCAN_MS = 8000;
 
 function isTargetPage() {
   return (
@@ -135,7 +142,14 @@ async function maybePrintLabels(result, parsedHint) {
       },
       labelCount
     );
-    await printLabels(zpl, labelCount);
+    await printLabels(zpl, labelCount, {
+      itemName: result.item.itemName,
+      gtin: result.parsed?.gtin || parsedHint?.gtin,
+      ndc: result.item.ndc,
+      upc: result.parsed?.upc || result.matchedCode || result.item.upc,
+      matchedCode: result.matchedCode,
+      invoiceNumber: result.invoice?.invoiceNumber,
+    });
     result.printed = true;
 
     // Best-effort: mark this invoice line item completed so a later scan of
@@ -265,6 +279,14 @@ function createSendScan() {
       return;
     }
 
+    // Record the ground truth for "what was actually scanned" -- everything
+    // except scan:dom-new comes directly from the physical barcode field, so
+    // this is what checkForNewScan() checks candidate DOM items against.
+    if (source !== 'scan:dom-new') {
+      lastScannedBarcode = value;
+      lastScannedBarcodeAt = Date.now();
+    }
+
     const dedupeKey = parsedHint?.gtin ? labelKey(parsedHint) : value;
     const now = Date.now();
     const lastAt = recent.get(dedupeKey);
@@ -339,15 +361,21 @@ function startGracePeriod() {
 function checkForNewScan(source) {
   if (!isActive) return;
 
-  // Confirmed in production logs (2026-07-09): a single physical scan can
-  // cause OneScan to bulk-render an entire order's line items into the DOM
-  // at once, before most of them are marked ".scanned". LABELS_SELECTOR now
-  // requires ".item-container.scanned" so those un-scanned items can no
-  // longer match at all -- `strictMatch` below is a defensive sanity check
-  // (should always be true now) rather than the primary guard. Kept, along
-  // with the batch-size warning, as an early-warning tripwire in case
-  // OneScan's markup ever changes in a way that reopens this gap.
-  const newItemsThisCheck = [];
+  // Confirmed in production logs (2026-07-09, and again 2026-07-10 *after*
+  // the LABELS_SELECTOR fix below was already live) that a single physical
+  // scan can cause OneScan to mark multiple order line items ".scanned" at
+  // once -- not just render them, actually mark them scanned. `strictMatch`
+  // is a defensive sanity check (should always be true given the selector)
+  // rather than the primary guard against that anymore.
+  //
+  // The real guard: when more than one new item shows up in the same check,
+  // only the one whose GTIN is actually contained in the barcode that was
+  // just physically scanned (tracked from the real input field in
+  // createSendScan(), never from this DOM watcher itself) gets looked
+  // up/printed. The rest are seeded as seen -- so they're never picked up
+  // later either -- and logged, not silently dropped.
+  const inGrace = isGracePeriod();
+  const newItems = [];
 
   document.querySelectorAll(BP_RX.LABELS_SELECTOR).forEach((el) => {
     const parsed = parseOneScanLabel(el.textContent);
@@ -357,33 +385,57 @@ function checkForNewScan(source) {
     if (seenLabels.has(key)) return;
 
     seenLabels.add(key);
+    newItems.push({ parsed, strictMatch: !!el.closest('.item-container.scanned') });
+  });
 
-    const strictMatch = !!el.closest('.item-container.scanned');
-    newItemsThisCheck.push({ gtin: parsed.gtin, strictMatch });
+  if (newItems.length === 0) return;
 
-    if (isGracePeriod()) {
-      BP_RX.log('New item during grace — seeded only', { gtin: parsed.gtin, strictMatch });
-      return;
-    }
+  if (inGrace) {
+    BP_RX.log('New items during grace — seeded only', {
+      count: newItems.length,
+      items: newItems.map(({ parsed }) => parsed.gtin),
+    });
+    return;
+  }
 
+  if (newItems.length > 1) {
+    BP_RX.warn('Multiple new items detected in a single DOM check — possible bulk order pull-in from one scan', {
+      source,
+      count: newItems.length,
+      items: newItems.map(({ parsed, strictMatch }) => ({ gtin: parsed.gtin, strictMatch })),
+    });
+  }
+
+  const recentPhysicalScan =
+    lastScannedBarcode && Date.now() - lastScannedBarcodeAt < RECENT_PHYSICAL_SCAN_MS
+      ? lastScannedBarcode
+      : null;
+
+  newItems.forEach(({ parsed, strictMatch }) => {
     if (!strictMatch) {
       BP_RX.warn(
         'New scan matched via loose ".labels-area" fallback (no .item-container.scanned ancestor) — possible bulk DOM injection, not a real scan',
-        { source, gtin: parsed.gtin, textPreview: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) }
+        { source, gtin: parsed.gtin }
       );
+    }
+
+    // Only gate multi-item batches -- a single new item is already the low-risk
+    // case LABELS_SELECTOR already covers, and requiring a physical-scan match
+    // here too would add regression risk without much benefit.
+    if (newItems.length > 1) {
+      const matchesLastScan = !!recentPhysicalScan && recentPhysicalScan.includes(parsed.gtin);
+      if (!matchesLastScan) {
+        BP_RX.warn(
+          'Skipping new item — GTIN not found in the barcode actually last scanned (likely bulk DOM injection, not a real scan)',
+          { source, gtin: parsed.gtin, strictMatch, hasRecentPhysicalScan: !!recentPhysicalScan }
+        );
+        return;
+      }
     }
 
     BP_RX.log('New scan detected (OneScan added item)', { source, gtin: parsed.gtin, strictMatch });
     sendScanFn(parsed.gtin, 'scan:dom-new', parsed);
   });
-
-  if (newItemsThisCheck.length > 1) {
-    BP_RX.warn('Multiple new items detected in a single DOM check — possible bulk order pull-in from one scan', {
-      source,
-      count: newItemsThisCheck.length,
-      items: newItemsThisCheck,
-    });
-  }
 }
 
 function scheduleDomCheck(source) {

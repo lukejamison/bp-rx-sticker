@@ -243,16 +243,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === 'PRINT_ZPL') {
     const labelCount = message.labelCount || 1;
+    const meta = message.meta || {};
     const printStart = Date.now();
-    log('PRINT_ZPL start', { labelCount, bytes: message.zpl?.length || 0 });
+    log('PRINT_ZPL start', { labelCount, bytes: message.zpl?.length || 0, ...meta });
     getPrintSettings()
       .then((settings) => printZplViaBridge(message.zpl, settings))
       .then((data) => {
-        log('PRINT_ZPL ok', { ms: Date.now() - printStart, ...data });
+        const ms = Date.now() - printStart;
+        log('PRINT_ZPL ok', { ms, ...data });
+        // This handler only ever runs for real (non-mock) prints -- maybeprintLabels()
+        // in onescan.js never calls printLabels() when mockPrint is on. That makes this
+        // the one authoritative "a physical label actually printed" signal, which was
+        // previously local-console-only. Forwarding it remotely closes the gap where a
+        // suspected bulk/phantom-scan event (see "Multiple new items detected...") could
+        // not be confirmed or ruled out against an actual print from Better Stack alone.
+        sendToBetterStack('INFO', 'Real label printed', { labelCount, ms, ...meta });
         sendResponse({ ok: true, ...data });
       })
       .catch((err) => {
-        warn('PRINT_ZPL failed', err.message, { ms: Date.now() - printStart });
+        warn('PRINT_ZPL failed', err.message, { ms: Date.now() - printStart, ...meta });
         sendResponse({
           ok: false,
           error: `${err.message}. Start: node extension/print-bridge/server.js`,
@@ -295,7 +304,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         log('REPRINT_LAST start', { labelCount, bytes: zpl.length });
         const printStart = Date.now();
         const data = await printZplViaBridge(zpl, printSettings);
-        log('REPRINT_LAST ok', { ms: Date.now() - printStart, ...data });
+        const ms = Date.now() - printStart;
+        log('REPRINT_LAST ok', { ms, ...data });
+        sendToBetterStack('INFO', 'Real label printed (manual reprint)', {
+          labelCount,
+          ms,
+          itemName: lastResult.item.itemName,
+          gtin: lastResult.parsed?.gtin,
+          ndc: lastResult.item.ndc,
+          upc: lastResult.parsed?.upc || lastResult.matchedCode || lastResult.item.upc,
+        });
         sendResponse({
           ok: true,
           ...data,
