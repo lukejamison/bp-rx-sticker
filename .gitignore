@@ -79,3 +79,18 @@ extension/print-bridge/logs/
 logs/*.txt
 logs/*.log
 logs/
+
+# n8n workflow files
+n8n/workflows/
+n8n/*.json
+n8n/*.yaml
+n8n/*.yml
+n8n/*.xml
+n8n/*.html
+n8n/*.css
+n8n/*.js
+n8n/*.ts
+n8n/*.tsx
+n8n/*.jsx
+n8n/*.json
+n8n/

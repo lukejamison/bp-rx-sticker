@@ -90,7 +90,7 @@
   }
 
   /**
-   * 1" x 1" (203 x 203 dots) — name, NDC, large price, supplier, rcvd/lot.
+   * 1" x 1" (203 x 203 dots) — name, NDC, large price, supplier, supplier item #, rcvd/lot.
    */
   function generateLabel(data) {
     const printWidth = data.printWidth || DEFAULT_PRINT_WIDTH;
@@ -128,6 +128,9 @@
     // clipping them, even across the 2 wrapped lines allowed for the name.
     const name = abbrevText(data.itemName, 2 * maxCharsForWidth(textWidth, fontName));
     const supplier = abbrevText(data.supplier, maxCharsForWidth(textWidth, fontMedWidth));
+    const supplierItem = data.supplierItemNumber
+      ? abbrevText(String(data.supplierItemNumber).trim(), maxCharsForWidth(textWidth, fontSmallWidth))
+      : '';
     const lotPrefix = 'Lot ';
     const rcvdPrefix = 'Rcvd ';
     const lotMaxChars = Math.max(4, maxCharsForWidth(textWidth, fontSmallWidth) - lotPrefix.length);
@@ -166,17 +169,32 @@
       y += fontMed + gap;
     }
 
-    const footerGap = 2;
-    const footerBottom = labelLength - 6;
-    if (lot) {
-      const lotY = footerBottom - fontSmall;
-      zpl += `\n^FO${MARGIN_X},${lotY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${lotPrefix}${escapeZpl(lot)}^FS`;
+    if (supplierItem) {
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${escapeZpl(supplierItem)}^FS`;
+      y += fontSmall + 2;
     }
-    if (received) {
-      const rcvdY = lot
-        ? footerBottom - fontSmall * 2 - footerGap
-        : footerBottom - fontSmall;
-      zpl += `\n^FO${MARGIN_X},${rcvdY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${rcvdPrefix}${escapeZpl(received)}^FS`;
+
+    const footerGap = 2;
+    if (supplierItem) {
+      if (received) {
+        zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${rcvdPrefix}${escapeZpl(received)}^FS`;
+        y += fontSmall + footerGap;
+      }
+      if (lot) {
+        zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${lotPrefix}${escapeZpl(lot)}^FS`;
+      }
+    } else {
+      const footerBottom = labelLength - 6;
+      if (lot) {
+        const lotY = footerBottom - fontSmall;
+        zpl += `\n^FO${MARGIN_X},${lotY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${lotPrefix}${escapeZpl(lot)}^FS`;
+      }
+      if (received) {
+        const rcvdY = lot
+          ? footerBottom - fontSmall * 2 - footerGap
+          : footerBottom - fontSmall;
+        zpl += `\n^FO${MARGIN_X},${rcvdY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${rcvdPrefix}${escapeZpl(received)}^FS`;
+      }
     }
 
     if (ndcDigits) {
@@ -197,6 +215,7 @@
       upc: '300030894212',
       cost: '4.52',
       supplier: 'CARDINAL HEALTH',
+      supplierItemNumber: '019174',
       dateReceived: '06/01/2026',
       lot: 'RF6342',
       printWidth,

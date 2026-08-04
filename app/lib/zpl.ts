@@ -26,12 +26,16 @@ export function generateLabel(data: LabelData): string {
     ? data.ndc 
     : data.ndc.replace(/(\d{5})(\d{4})(\d{2})/, '$1-$2-$3');
 
+  // Truncate supplier item number if present
+  const supplierItemNumber = data.supplierItemNumber?.trim() || '';
+
   logger.debug('Label data processed:', {
     itemName,
     formattedNDC,
     cost: data.cost,
     dateReceived: data.dateReceived,
     supplier: data.supplier,
+    supplierItemNumber,
     timestamp,
   });
 
@@ -43,13 +47,19 @@ export function generateLabel(data: LabelData): string {
   // ^FS = Field Separator
   // ^XZ = End format
 
+  const supplierLine = supplierItemNumber
+    ? `^FO20,120^A0N,18,18^FDFrom: ${data.supplier}^FS
+^FO20,138^A0N,16,16^FD${supplierItemNumber}^FS
+^FO20,155^A0N,14,14^FDPrinted: ${timestamp}^FS`
+    : `^FO20,120^A0N,18,18^FDFrom: ${data.supplier}^FS
+^FO20,145^A0N,14,14^FDPrinted: ${timestamp}^FS`;
+
   const zpl = `^XA
 ^FO20,15^A0N,23,23^FD${itemName}^FS
 ^FO20,45^A0N,18,18^FDNDC: ${formattedNDC}^FS
 ^FO20,70^A0N,18,18^FDCost: $${data.cost}^FS
 ^FO20,95^A0N,18,18^FDRcvd: ${data.dateReceived}^FS
-^FO20,120^A0N,18,18^FDFrom: ${data.supplier}^FS
-^FO20,145^A0N,14,14^FDPrinted: ${timestamp}^FS
+${supplierLine}
 ^XZ`;
   
   logger.debug('ZPL generated successfully, length:', zpl.length);

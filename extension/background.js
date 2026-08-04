@@ -54,6 +54,7 @@ function buildLabelData(lastResult) {
     cost: lastResult.item.cost,
     dateReceived: lastResult.item.lastReceived,
     supplier: lastResult.item.supplier,
+    supplierItemNumber: lastResult.item.supplierItemNumber,
   };
 }
 

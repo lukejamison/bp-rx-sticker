@@ -6,6 +6,7 @@ export interface InvoiceItem {
   cost: string;
   lastReceived: string;
   supplier: string;
+  supplierItemNumber?: string;
   stockSize: string;
   strength: string;
   invoiceQty: string;
@@ -73,4 +74,5 @@ export interface LabelData {
   cost: string;
   dateReceived: string;
   supplier: string;
+  supplierItemNumber?: string;
 }

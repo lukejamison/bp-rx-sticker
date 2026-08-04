@@ -120,6 +120,7 @@ export const useStore = create<AppState>((set, get) => ({
         cost: response.item.cost,
         dateReceived: response.item.lastReceived,
         supplier: response.item.supplier,
+        supplierItemNumber: response.item.supplierItemNumber,
       }, labelCount);
       logger.debug('ZPL generated, length:', zpl.length);
 
@@ -244,6 +245,7 @@ export const useStore = create<AppState>((set, get) => ({
         cost: item.cost,
         dateReceived: item.lastReceived,
         supplier: item.supplier,
+        supplierItemNumber: item.supplierItemNumber,
       });
 
       logger.info('📤 Sending reprint to printer...');

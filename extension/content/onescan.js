@@ -137,6 +137,7 @@ async function maybePrintLabels(result, parsedHint) {
         cost: result.item.cost,
         dateReceived: result.item.lastReceived,
         supplier: result.item.supplier,
+        supplierItemNumber: result.item.supplierItemNumber,
         printWidth: printSettings.printWidth,
         labelLength: printSettings.labelLength,
       },
