@@ -21,6 +21,9 @@ let gracePeriodEnds = 0;
 let lastScannedBarcode = '';
 let lastScannedBarcodeAt = 0;
 const RECENT_PHYSICAL_SCAN_MS = 8000;
+/** Suppress "not found" toasts when a duplicate lookup fires right after a successful print. */
+const SUPPRESS_NOT_FOUND_AFTER_PRINT_MS = 8000;
+let lastSuccessfulPrint = null;
 
 function isTargetPage() {
   return (
@@ -182,6 +185,29 @@ async function persistLastResult(result) {
   await chrome.storage.local.set({ lastResult: result });
 }
 
+function recordSuccessfulPrint(result, parsedHint) {
+  const gtin = parsedHint?.gtin || result?.parsed?.gtin || '';
+  lastSuccessfulPrint = {
+    at: Date.now(),
+    gtin,
+    upc: result?.item?.upc || parsedHint?.upc || result?.parsed?.upc || '',
+    ndc: result?.item?.ndc || parsedHint?.ndc || result?.parsed?.ndc || '',
+    matchedCode: result?.matchedCode || '',
+  };
+}
+
+function shouldSuppressNotFoundAfterPrint(result, parsedHint) {
+  if (!lastSuccessfulPrint) return false;
+  if (Date.now() - lastSuccessfulPrint.at > SUPPRESS_NOT_FOUND_AFTER_PRINT_MS) return false;
+
+  const gtin = parsedHint?.gtin || result?.parsed?.gtin || '';
+  const last = lastSuccessfulPrint;
+  if (gtin && last.gtin && gtin === last.gtin) return true;
+  if (gtin && last.matchedCode && last.matchedCode.includes(gtin)) return true;
+  if (lastScannedBarcode && gtin && lastScannedBarcode.includes(gtin)) return true;
+  return false;
+}
+
 async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
   if (result.reason === 'duplicate' || result.reason === 'wrong_page') {
     BP_RX.log('Lookup skipped', result.reason);
@@ -195,6 +221,14 @@ async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
   const timingLine = () => BP_RX.formatTiming(finalizeTiming(result, scanStartedAt));
 
   if (!result.ok) {
+    if (shouldSuppressNotFoundAfterPrint(result, parsedHint)) {
+      BP_RX.log('Suppressing not-found UI — label already printed for this scan', {
+        gtin: parsedHint?.gtin || result?.parsed?.gtin,
+      });
+      finalizeTiming(result, scanStartedAt);
+      return;
+    }
+
     finalizeTiming(result, scanStartedAt);
     await persistLastResult(result);
     BP_RX.log('Scan timing', result.timing);
@@ -232,6 +266,9 @@ async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
     const { printMs, labelCount } = await maybePrintLabels(result, parsedHint);
     finalizeTiming(result, scanStartedAt, printMs);
     await persistLastResult(result);
+    if (!result.mockPrint) {
+      recordSuccessfulPrint(result, parsedHint);
+    }
     BP_RX.log('Scan timing', result.timing);
 
     const qtyLabel = labelCount === 1 ? '1 label' : `${labelCount} labels`;
@@ -420,9 +457,18 @@ function checkForNewScan(source) {
       );
     }
 
-    // Only gate multi-item batches -- a single new item is already the low-risk
-    // case LABELS_SELECTOR already covers, and requiring a physical-scan match
-    // here too would add regression risk without much benefit.
+    // One physical scan usually triggers BOTH the barcode input listener and a
+    // dom-new event when OneScan marks the line item .scanned. Skip the
+    // duplicate dom-new lookup when the real scanner input already handled it.
+    if (recentPhysicalScan && recentPhysicalScan.includes(parsed.gtin)) {
+      BP_RX.log('Skipping dom-new — physical scan already triggered lookup', {
+        source,
+        gtin: parsed.gtin,
+        strictMatch,
+      });
+      return;
+    }
+
     if (newItems.length > 1) {
       const matchesLastScan = !!recentPhysicalScan && recentPhysicalScan.includes(parsed.gtin);
       if (!matchesLastScan) {

@@ -129,7 +129,7 @@ async function processScan(raw, meta = {}) {
   try {
     lookup = await lookupWithCandidates(lookupCodes, settings);
   } catch (err) {
-    warn('lookup failed', err.message, err.tried);
+    warn('lookup failed', err.message, { tried: err.tried || lookupCodes, source: meta.source });
     const apiMs = Date.now() - apiStart;
     const payload = {
       ok: false,

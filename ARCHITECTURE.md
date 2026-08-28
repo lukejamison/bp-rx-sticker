@@ -1,129 +1,81 @@
-# How Vercel Deployment Works
+# Architecture
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    VERCEL CLOUD                         │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Your PWA App (Static Files + React)              │  │
-│  │  https://bp-rx-sticker.vercel.app                 │  │
-│  │  - HTML/CSS/JavaScript                            │  │
-│  │  - React components                               │  │
-│  │  - No backend, just frontend                      │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                         ↓
-                    (User loads)
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│              Zebra T56 Mobile Device                    │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Chrome Browser                                   │  │
-│  │  App loaded from Vercel                           │  │
-│  │  https://bp-rx-sticker.vercel.app                 │  │
-│  └───────────────────────────────────────────────────┘  │
-│                         ↓                               │
-│  (App makes API calls from T56 device)                 │
-│                         ↓                               │
-└─────────────────────────────────────────────────────────┘
-                         ↓
-                  (Local Network)
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│            Your Local API Server                        │
-│  http://172.18.129.154:3000                            │
-│  - Running on your network                             │
-│  - PostgreSQL database                                 │
-│  - Invoice data                                        │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Why This Works
-
-1. **Vercel hosts the frontend only**
-   - Static HTML/CSS/JavaScript files
-   - React app code
-   - No backend logic
-
-2. **API stays on your local network**
-   - Your data never leaves your network
-   - Database stays private
-   - API runs on your server (172.18.129.154)
-
-3. **T56 device connects both**
-   - Loads app from Vercel (internet)
-   - Calls API directly (local network)
-   - Works because T56 is on your network
-
-## Key Benefits
-
-✅ **No server management** - Vercel handles hosting  
-✅ **Always online** - No need to keep laptop running  
-✅ **Auto updates** - Push to GitHub = auto deploy  
-✅ **Free** - No hosting costs  
-✅ **Fast** - Loads instantly from CDN  
-✅ **Secure** - API stays private on local network  
-
-## Data Flow
+## Production system (OneScan + Chrome extension)
 
 ```
-1. User opens app on T56
-   → Loads from Vercel (internet)
-   
-2. User scans barcode
-   → T56 makes API call to 172.18.129.154:3000 (local)
-   → Gets invoice data
-   
-3. App generates ZPL
-   → Sends to Zebra printer via Browser Print (Bluetooth)
-   
-4. Label prints
-   → T56 calls API to mark completed (local)
+┌─────────────────────────────────────────────────────────────────┐
+│  Windows workstation (OneScan receiving PC)                     │
+│                                                                 │
+│  ┌──────────────┐    ┌─────────────────┐    ┌───────────────┐  │
+│  │ OneScan      │    │ BP RX Chrome    │    │ Print bridge  │  │
+│  │ (PioneerRx)  │───▶│ extension       │───▶│ Node :9101    │──┼──▶ Zebra printer
+│  │ in Chrome    │    │ scan + ZPL      │    │ (scheduled    │  │    (LAN :9100)
+│  └──────────────┘    └────────┬────────┘    │  task)        │  │
+│                               │              └───────────────┘  │
+│  ┌──────────────┐             │                                 │
+│  │ Bridge       │─────────────┘ polls /health                    │
+│  │ Monitor tray │  (optional — restart, send logs)              │
+│  └──────────────┘                                               │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ HTTP (LAN)
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Linux API server — 172.18.129.154:3000                         │
+│  ~/prx-api/server.js (systemd: prx-api)                         │
+│  PostgreSQL — prx_invoices, prx_invoices_completed              │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ▲
+                                │ webhook
+┌───────────────────────────────┴─────────────────────────────────┐
+│  n8n — PRX Invoice Detail workflow                            │
+│  PioneerRx ActiveReport → Postgres upsert                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Security
+## Scan → print flow
 
-- ✅ API not exposed to internet
-- ✅ Data stays on your network
-- ✅ Only frontend hosted publicly
-- ✅ T56 must be on your network to work
+1. Staff scans a barcode on the OneScan **SSCC Scan In** page.
+2. Extension content script (`extension/content/onescan.js`) detects the scan from the barcode input field (and guards against duplicate DOM events).
+3. Background worker (`extension/background.js`) parses GS1 data, calls the API with UPC/NDC candidates.
+4. On success, `extension/lib/zpl.js` builds ZPL; background POSTs to `http://127.0.0.1:9101/print`.
+5. Print bridge (`extension/print-bridge/server.js`) queues the job and sends raw ZPL to the printer via TCP :9100.
+6. Extension marks the invoice line item completed via `POST /api/completed`.
 
-## Requirements
+## Components
 
-For this to work:
-1. T56 must be on same network as API server
-2. API server must be running (172.18.129.154:3000)
-3. Database must be accessible
-4. Zebra Browser Print installed on T56
+| Piece | Technology | Runs where |
+|-------|------------|------------|
+| Extension | Chrome MV3 | OneScan PC |
+| Print bridge | Node.js | OneScan PC (scheduled task) |
+| Bridge monitor | .NET 8 WinForms | OneScan PC (optional tray app) |
+| API | Node.js + Express | Linux server |
+| Database | PostgreSQL | Linux server |
+| Invoice sync | n8n workflow | n8n host |
 
-## Alternatives
+## Telemetry
 
-### Option A: Vercel + Local API (This Setup)
-- Frontend: Vercel (free, fast)
-- API: Your server (private, secure)
-- Best for: Internal network use
+Better Stack source **2587655** (`bp-rx-sticker`):
 
-### Option B: All Local
-- Frontend: Your server or laptop
-- API: Your server
-- Best for: Maximum privacy, no internet needed
+- Extension → Options page Better Stack token (prints, lookup failures, scan guards)
+- Print bridge → `config.local.env` tokens (bridge WARN/ERROR, startup ping)
 
-### Option C: All Cloud
-- Frontend: Vercel
-- API: Vercel Serverless or AWS Lambda
-- Database: Supabase or AWS RDS
-- Best for: Access from anywhere, full cloud
+## Legacy path (not production)
 
-## Recommended: Option A (Vercel + Local API)
+The `app/` Next.js PWA targeted Zebra T56 handhelds with Browser Print over Bluetooth. Code is retained; see [`docs/LEGACY-PWA.md`](./docs/LEGACY-PWA.md).
 
-Perfect balance:
-- Easy deployment (push to GitHub)
-- No server management
-- Data stays private
-- Works great for internal use
-- Free hosting
+## Network requirements
 
----
+| From | To | Port |
+|------|-----|------|
+| Workstation | API server | 3000 |
+| Workstation | Zebra printer | 9100 |
+| Extension | Print bridge | 9101 (localhost) |
+| PioneerRx | n8n webhook | 443/5678 (n8n host) |
 
-**Ready to deploy?** See `DEPLOY_CHECKLIST.md`
+All pharmacy workstations and the API server must be on the same LAN (or routed network).
+
+## Related docs
+
+- [`INSTALL-WINDOWS.md`](./INSTALL-WINDOWS.md) — workstation setup
+- [`UPDATE_PROCEDURE.md`](./UPDATE_PROCEDURE.md) — shipping code changes
+- [`help_docs/PRX_INVOICE_SYSTEM_DOCUMENTATION.md`](./help_docs/PRX_INVOICE_SYSTEM_DOCUMENTATION.md) — API + database reference

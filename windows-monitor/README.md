@@ -104,5 +104,4 @@ REM 5. OneScan → SSCC Scan In → scan
 ## Related
 
 - Print bridge: `extension/print-bridge/README.md`
-- Planning notes: `extension/print-bridge/WINDOWS_MONITOR_APP.md`
 - Chrome extension: `extension/`

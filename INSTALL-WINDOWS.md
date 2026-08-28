@@ -74,6 +74,9 @@ install-monitor.bat
 
 Accept the **UAC** prompt. Look for the tray icon near the clock (green / amber / red).
 
+> **Note:** The monitor does not auto-restart after a bridge reset. If the tray icon disappears later, run:
+> `Start-ScheduledTask -TaskName 'BP-RX-BridgeMonitor'`
+
 Double-click the tray icon → confirm **Running as Administrator** and paths to bridge logs if needed → **Save paths**.
 
 **Send logs test:** tray menu → **Send logs to IT**

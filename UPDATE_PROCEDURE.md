@@ -1,96 +1,76 @@
-# Update procedure — Chrome extension + print bridge
+# Update procedure — extension + print bridge
 
-How to safely ship a code change to a scan workstation that's **already
-installed** (see [`INSTALL-WINDOWS.md`](./INSTALL-WINDOWS.md) for a fresh
-install instead). Covers `extension/` (Chrome extension) and
-`extension/print-bridge/` (Node print bridge) only — the two components that
-change most often.
+How to ship a code change to a **OneScan workstation that is already installed**.
 
-## Versioning convention
+For a brand-new PC, use [`INSTALL-WINDOWS.md`](./INSTALL-WINDOWS.md) instead.
 
-Two independent version numbers, both bumped whenever their code changes:
+---
 
-| Component | Where the version lives | How to check it live |
-|---|---|---|
+## What you're updating
+
+| Component | Version location | Verify live |
+|-----------|------------------|-------------|
 | Chrome extension | `extension/manifest.json` → `"version"` | `chrome://extensions` card |
-| Print bridge | `BRIDGE_VERSION` const in `extension/print-bridge/server.js` | `GET http://127.0.0.1:9101/health` → `bridgeVersion` |
+| Print bridge | `BRIDGE_VERSION` in `extension/print-bridge/server.js` | `http://127.0.0.1:9101/health` → `bridgeVersion` |
+| Bridge monitor | Rebuild only when `windows-monitor/` changed | Tray icon near clock |
 
-Whenever you change `server.js`, also bump `BRIDGE_VERSION` **and** the
-version check in `diagnose-print.ps1` (`$health.bridgeVersion -ne '...'`) to
-match — otherwise the diagnostic script will report a false "stale bridge"
-warning forever. Add an entry to
-[`extension/print-bridge/CHANGELOG.md`](./extension/print-bridge/CHANGELOG.md)
-for any bridge change, even a small one — it's the fastest way to answer
-"did this workstation actually get the fix?" during an incident.
+Bump the version whenever you change that component's code. For bridge changes, also update the version string in `diagnose-print.ps1` and add a line to `extension/print-bridge/CHANGELOG.md`.
 
-## Before rolling out
+---
 
-1. Make the code change in this repo (wherever you're developing — not
-   directly on the workstation).
-2. Bump version number(s) per the table above.
-3. `node --check extension/print-bridge/server.js` (or open in an editor with
-   linting) — catches syntax errors before they reach a machine printing live
-   labels.
-4. If you have a local Node install, run `node extension/print-bridge/server.js`
-   manually and hit `http://127.0.0.1:9101/health` to sanity-check before
-   shipping to a workstation.
-5. Commit and push.
+## Before you push
 
-## Rolling out to a workstation
+1. Make changes on your dev machine (not directly on the workstation).
+2. Bump version number(s).
+3. `node --check extension/print-bridge/server.js`
+4. Commit and push to GitHub.
 
-### Step 1 — get the new code onto the machine
+---
 
-**Preferred: `git pull`** (if the workstation's copy is a real git clone with
-no local edits):
+## On the workstation
+
+### Step 1 — Get new code
 
 ```powershell
-cd C:\bp-rx-sticker   # or wherever this repo lives on that PC
+cd C:\bp-rx-sticker   # or your actual repo path
 git pull
 ```
 
-**Fallback: manual file copy** (if the workstation's copy isn't a clean git
-clone, or git isn't installed there). Only copy files that actually changed —
-check `git log --stat` or the CHANGELOG for the specific paths. Typical hot
-paths:
+If git isn't available, copy only the files that changed (check `git log --stat`).
 
-| File(s) | When you'd touch them |
-|---|---|
-| `extension/lib/zpl.js` | Label layout/formatting changes |
-| `extension/lib/api.js`, `extension/background.js` | API/lookup/completion-tracking logic |
-| `extension/content/onescan.js`, `content/shared.js` | Scan detection / OneScan page behavior |
-| `extension/manifest.json` | Version bump, permissions |
-| `extension/print-bridge/server.js` | Bridge stability/behavior changes |
-| `extension/print-bridge/*.ps1` | Install/diagnostic script changes |
-
-### Step 2 — apply the update per component
-
-**Chrome extension** (any file under `extension/` except `print-bridge/`):
+### Step 2 — Chrome extension
 
 1. `chrome://extensions`
-2. Click the reload icon (↻) on the **BP RX Sticker** card
-3. Refresh any open OneScan tab (extension content scripts don't hot-reload
-   into already-open pages)
-4. Confirm the version number shown on the card matches what you expect
+2. Reload **BP RX Sticker**
+3. **Refresh every open OneScan tab** (content scripts don't hot-reload)
+4. Confirm version matches what you shipped
 
-**Print bridge** (`extension/print-bridge/server.js` or its `.ps1` scripts
-changed):
+Typical hot paths:
+
+| Files | When |
+|-------|------|
+| `extension/lib/zpl.js` | Label layout |
+| `extension/content/onescan.js` | Scan detection |
+| `extension/background.js`, `extension/lib/api.js` | Lookup / completion |
+| `extension/manifest.json` | Version, permissions |
+
+### Step 3 — Print bridge (only if `extension/print-bridge/` changed)
 
 ```powershell
-extension\print-bridge\reset-bridge.ps1
+powershell -ExecutionPolicy Bypass -File extension\print-bridge\reset-bridge.ps1
 ```
 
-This force-kills any stale process on the bridge port and restarts cleanly
-under the scheduled task. If that doesn't come back healthy, escalate to
-`nuclear-reset.ps1` (see [`TROUBLESHOOTING.md`](./extension/print-bridge/TROUBLESHOOTING.md)).
+If unhealthy, see [`extension/print-bridge/TROUBLESHOOTING.md`](./extension/print-bridge/TROUBLESHOOTING.md).
 
-If only `config.local.env` changed (e.g. adding Better Stack credentials, no
-code change), a plain restart is enough:
+Config-only change (e.g. Better Stack token in `config.local.env`):
 
 ```powershell
 Restart-ScheduledTask -TaskName 'BP-RX-PrintBridge'
 ```
 
-**Windows monitor app** (rare — only if `windows-monitor/` changed):
+### Step 4 — Bridge monitor (rare)
+
+Only when `windows-monitor/` changed:
 
 ```powershell
 cd windows-monitor
@@ -98,51 +78,68 @@ build.bat
 install-monitor.bat
 ```
 
-### Step 3 — verify
+**After any bridge reset:** the monitor does **not** auto-restart. If the tray icon is missing:
+
+```powershell
+Start-ScheduledTask -TaskName 'BP-RX-BridgeMonitor'
+```
+
+### Step 5 — API server (only if `api-endpoints/` changed)
+
+On the Linux server — **not** on the Windows PC:
+
+```bash
+ssh luke@172.18.129.154
+cd ~/prx-api
+# merge changes from api-endpoints/ into server.js
+sudo systemctl restart prx-api
+```
+
+---
+
+## Verify
 
 ```powershell
 extension\print-bridge\diagnose-print.ps1
 ```
 
-This reports scheduled task state, port listener, live `bridgeVersion` vs.
-expected, printer reachability, and does a live test print. Also manually
-confirm:
+Checklist:
 
-- [ ] `http://127.0.0.1:9101/health` → `bridgeVersion` matches what you just shipped
-- [ ] `chrome://extensions` → extension version matches what you just shipped
-- [ ] Scan a real product on OneScan → correct label count prints, exactly once
-- [ ] No new warnings in `extension/print-bridge/logs/server-*.log` or the
-      Better Stack dashboard (if configured — see below)
+- [ ] `http://127.0.0.1:9101/health` → `bridgeVersion` matches
+- [ ] `chrome://extensions` → extension version matches
+- [ ] Scan a real product on OneScan → correct label prints once
+- [ ] Tray monitor icon visible (if installed)
+- [ ] Better Stack dashboard shows recent events (if alerting configured)
 
-### Step 4 — rollback if something's wrong
+---
 
-- **Extension:** `git checkout <previous-commit> -- extension/`, reload at
-  `chrome://extensions`
-- **Print bridge:** `git checkout <previous-commit> -- extension/print-bridge/server.js`,
-  then `reset-bridge.ps1`
+## Rollback
 
-Since `config.local.env` isn't tracked in git (it's workstation-specific), a
-`git checkout` on the bridge never touches printer IP / Better Stack config —
-only code.
+```powershell
+git checkout <previous-commit> -- extension/
+# reload extension at chrome://extensions
 
-## Multiple workstations
+git checkout <previous-commit> -- extension/print-bridge/server.js
+extension\print-bridge\reset-bridge.ps1
+```
 
-If more than one PC runs this (e.g. `DELIVERY01` plus others), roll out to
-one workstation first, run the full verification checklist above, watch it
-print for a real shift if possible, *then* repeat on the rest. Track which
-workstation is on which version somewhere durable (this repo's
-[Notion doc](https://app.notion.com/p/38e2bc22f56f80279db6c3e6c788eee9) is
-the current source of truth) so a future incident report like "it's broken on
-the delivery PC" can be immediately cross-checked against whether that PC
-actually has the fix yet.
+`config.local.env` is not in git — rollback never touches printer IP or Better Stack tokens.
 
-## Monitoring after rollout
+---
 
-If Better Stack alerting is configured (see
-[`extension/print-bridge/README.md`](./extension/print-bridge/README.md#better-stack-alerting-optional)
-and the extension's Options page → **Alerting**), you'll get a real-time
-alert for print bridge crashes/errors and extension-side print/lookup
-failures without needing to check logs manually. Restarting the bridge after
-an update always emits one `INFO` "print bridge started" event — a quick way
-to confirm the update reached the workstation and the bridge came back up
-cleanly.
+## Multi-workstation rollout
+
+Update **one PC first**, verify through a real shift, then repeat on the rest. Track which machine is on which version.
+
+---
+
+## What does **not** need updating
+
+| Change | Workstation action |
+|--------|-------------------|
+| Label layout only | Extension reload |
+| Scan logic only | Extension reload |
+| Bridge stability fix | `reset-bridge.ps1` |
+| API field added | Linux server only |
+| n8n workflow | n8n UI only |
+| Legacy `app/` PWA | Not used on OneScan PCs |
