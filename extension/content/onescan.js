@@ -23,7 +23,44 @@ let lastScannedBarcodeAt = 0;
 const RECENT_PHYSICAL_SCAN_MS = 8000;
 /** Suppress "not found" toasts when a duplicate lookup fires right after a successful print. */
 const SUPPRESS_NOT_FOUND_AFTER_PRINT_MS = 8000;
+/** Block a second physical print for the same GTIN + invoice within this window. */
+const PRINT_DEDUPE_MS = 3000;
 let lastSuccessfulPrint = null;
+let lastPhysicalPrint = null;
+
+/** Pull a 14-digit GTIN out of common GS1 / raw scanner strings for dedupe keys. */
+function extractGtinFromRaw(raw) {
+  const s = String(raw || '').trim();
+  const ai01 = s.match(/\(01\)(\d{14})/) || s.match(/01(\d{14})/);
+  if (ai01) return ai01[1];
+  if (/^\d{14}$/.test(s)) return s;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 14) {
+    const match = digits.match(/(\d{14})/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+function scanDedupeKey(raw, parsedHint) {
+  if (parsedHint?.gtin) return `gtin:${parsedHint.gtin}`;
+  const gtin = extractGtinFromRaw(raw);
+  if (gtin) return `gtin:${gtin}`;
+  return String(raw || '').trim();
+}
+
+function printDedupeKey(result, parsedHint) {
+  const gtin =
+    parsedHint?.gtin || result?.parsed?.gtin || extractGtinFromRaw(result?.matchedCode) || '';
+  const invoice = result?.invoice?.invoiceNumber || '';
+  return [gtin, invoice].filter(Boolean).join('|');
+}
+
+function shouldSkipDuplicatePrint(result, parsedHint) {
+  if (!lastPhysicalPrint) return false;
+  if (Date.now() - lastPhysicalPrint.at > PRINT_DEDUPE_MS) return false;
+  return printDedupeKey(result, parsedHint) === lastPhysicalPrint.key;
+}
 
 function isTargetPage() {
   return (
@@ -107,12 +144,21 @@ function formatParsedMeta(parsed) {
   return parts.join(' · ');
 }
 
-async function maybePrintLabels(result, parsedHint) {
+async function maybePrintLabels(result, parsedHint, scanSource) {
   const labelCount = result.labelCount ?? resolveLabelCount(result.item);
   result.labelCount = labelCount;
 
   if (result.status !== 'ready_to_print' || result.mockPrint || printInFlight) {
     return { printMs: 0, labelCount };
+  }
+
+  if (shouldSkipDuplicatePrint(result, parsedHint)) {
+    BP_RX.log('Skipping duplicate print — same item just printed', {
+      source: scanSource,
+      gtin: parsedHint?.gtin || result?.parsed?.gtin,
+      invoiceNumber: result?.invoice?.invoiceNumber,
+    });
+    return { printMs: 0, labelCount, skippedDuplicate: true };
   }
 
   printInFlight = true;
@@ -153,8 +199,13 @@ async function maybePrintLabels(result, parsedHint) {
       upc: result.parsed?.upc || result.matchedCode || result.item.upc,
       matchedCode: result.matchedCode,
       invoiceNumber: result.invoice?.invoiceNumber,
+      source: scanSource,
     });
     result.printed = true;
+    lastPhysicalPrint = {
+      at: Date.now(),
+      key: printDedupeKey(result, parsedHint),
+    };
 
     // Best-effort: mark this invoice line item completed so a later scan of
     // another physical unit of the *same* product (same NDC on this invoice)
@@ -208,7 +259,7 @@ function shouldSuppressNotFoundAfterPrint(result, parsedHint) {
   return false;
 }
 
-async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
+async function handleScanResult(raw, result, parsedHint, scanStartedAt, scanSource) {
   if (result.reason === 'duplicate' || result.reason === 'wrong_page') {
     BP_RX.log('Lookup skipped', result.reason);
     return;
@@ -263,7 +314,16 @@ async function handleScanResult(raw, result, parsedHint, scanStartedAt) {
   }
 
   try {
-    const { printMs, labelCount } = await maybePrintLabels(result, parsedHint);
+    const { printMs, labelCount, skippedDuplicate } = await maybePrintLabels(
+      result,
+      parsedHint,
+      scanSource
+    );
+    if (skippedDuplicate) {
+      finalizeTiming(result, scanStartedAt);
+      return;
+    }
+
     finalizeTiming(result, scanStartedAt, printMs);
     await persistLastResult(result);
     if (!result.mockPrint) {
@@ -325,7 +385,7 @@ function createSendScan() {
       lastScannedBarcodeAt = Date.now();
     }
 
-    const dedupeKey = parsedHint?.gtin ? labelKey(parsedHint) : value;
+    const dedupeKey = scanDedupeKey(value, parsedHint);
     const now = Date.now();
     const lastAt = recent.get(dedupeKey);
     if (lastAt && now - lastAt < BP_RX.DEDUPE_MS) {
@@ -354,7 +414,7 @@ function createSendScan() {
           return;
         }
         BP_RX.log('← API result', result?.status || result?.reason || result?.ok, result?.timing);
-        await handleScanResult(value, result || {}, parsedHint, scanStartedAt);
+        await handleScanResult(value, result || {}, parsedHint, scanStartedAt, source);
       }
     );
   };
@@ -543,8 +603,10 @@ function attachBarcodeListener(input) {
 
       if (lastNonEmpty.length >= BP_RX.MIN_SCAN_LENGTH && value.length === 0) {
         BP_RX.log('Barcode input cleared');
+        clearTimeout(keyIdleTimer);
+        keyIdleTimer = null;
+        keyBuffer = '';
         sendScanFn(lastNonEmpty, 'scan:input-cleared');
-        flushKeyBuffer();
         lastNonEmpty = '';
       }
     },

@@ -258,7 +258,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // previously local-console-only. Forwarding it remotely closes the gap where a
         // suspected bulk/phantom-scan event (see "Multiple new items detected...") could
         // not be confirmed or ruled out against an actual print from Better Stack alone.
-        sendToBetterStack('INFO', 'Real label printed', { labelCount, ms, ...meta });
+        sendToBetterStack('INFO', 'Real label printed', {
+          labelCount,
+          ms,
+          source: meta.source,
+          ...meta,
+        });
         sendResponse({ ok: true, ...data });
       })
       .catch((err) => {
