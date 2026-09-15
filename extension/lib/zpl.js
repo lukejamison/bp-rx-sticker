@@ -6,6 +6,12 @@
 
   const LABEL_HOME_Y = 8;
   const MARGIN_X = 6;
+  /** Uniform +2% scale for all label fonts (ZPL uses whole dots). */
+  const FONT_SCALE = 1.02;
+
+  function scaleFont(size) {
+    return Math.max(1, Math.round(size * FONT_SCALE));
+  }
 
   function escapeZpl(text) {
     // Strip embedded newlines/tabs/control chars first -- a raw \n or \r inside
@@ -101,15 +107,15 @@
     const ndcDigits = ndcBarcodeDigits(data.ndc);
     const price = formatPrice(data.cost);
 
-    const fontName = 18;
-    const fontCode = 17;
-    const fontCodeLabel = 15;
-    const fontPrice = price.length <= 7 ? 38 : 32;
-    const fontMed = 20;
-    const fontMedWidth = 15;
-    const fontSmall = 17;
-    const fontSmallWidth = 13;
-    const gap = 4;
+    const fontName = scaleFont(18);
+    const fontCode = scaleFont(17);
+    const fontCodeLabel = scaleFont(15);
+    const fontPrice = scaleFont(price.length <= 7 ? 38 : 32);
+    const fontMed = scaleFont(20);
+    const fontMedWidth = scaleFont(15);
+    const fontSmall = scaleFont(17);
+    const fontSmallWidth = scaleFont(13);
+    const gap = scaleFont(4);
 
     // Data Matrix geometry, computed up front so every text field can derive
     // its safe width from where the barcode *actually* lands instead of a
@@ -118,9 +124,9 @@
     // barcode itself -- e.g. the supplier line printed directly on top of it.)
     const dmModule = 4;
     const dmSize = ndcDigits ? dmModule * 16 : 0;
-    const dmX = printWidth - dmSize - 14;
-    const dmY = labelLength - dmSize - 10;
-    const dmGap = 8;
+    const dmX = printWidth - dmSize - scaleFont(14);
+    const dmY = labelLength - dmSize - scaleFont(10);
+    const dmGap = scaleFont(8);
     const textWidth = ndcDigits ? Math.max(60, dmX - MARGIN_X - dmGap) : contentWidth;
 
     // ^FB fields must be truncated to fit textWidth *before* printing (see
@@ -140,6 +146,22 @@
     const ndcFormatted = abbrevText(formatNdc(data.ndc), 14);
     const upcLine = abbrevText(formatUpcLine(data.upc), maxCharsForWidth(textWidth, fontCode));
 
+    const footerGap = scaleFont(2);
+    const footerLines = [];
+    if (received) footerLines.push({ prefix: rcvdPrefix, value: received });
+    if (lot) footerLines.push({ prefix: lotPrefix, value: lot });
+    const footerBlockHeight =
+      footerLines.length * (fontSmall + footerGap) + scaleFont(6);
+    const contentLimitY = labelLength - footerBlockHeight;
+
+    function fitsLine(yPos, lineHeight) {
+      return yPos + lineHeight <= contentLimitY;
+    }
+
+    function appendSmallLine(targetY, prefix, value) {
+      return `\n^FO${MARGIN_X},${targetY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${prefix}${escapeZpl(value)}^FS`;
+    }
+
     let y = homeY;
 
     let zpl = `^XA
@@ -150,51 +172,40 @@
 ^CI28
 ^FO${MARGIN_X},${y}^A0N,${fontName},${fontName}^FB${textWidth},2,${gap},L,0^FD${escapeZpl(name)}^FS`;
 
-    y += fontName * 2 + gap + 2;
-    if (ndcFormatted) {
+    y += fontName * 2 + gap + scaleFont(2);
+
+    if (ndcFormatted && fitsLine(y, fontCodeLabel + 1 + fontCode + gap)) {
       zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCodeLabel},${fontCodeLabel}^FDNDC^FS`;
       y += fontCodeLabel + 1;
       zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCode},${fontCode}^FD${escapeZpl(ndcFormatted)}^FS`;
       y += fontCode + gap;
-    } else if (upcLine) {
+    } else if (upcLine && fitsLine(y, fontCode + gap)) {
       zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontCode},${fontCode}^FB${textWidth},1,0,L,0^FD${escapeZpl(upcLine)}^FS`;
       y += fontCode + gap;
     }
 
-    zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontPrice},${fontPrice}^FD${escapeZpl(price)}^FS`;
-    y += fontPrice + gap;
+    if (fitsLine(y, fontPrice + gap)) {
+      zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontPrice},${fontPrice}^FD${escapeZpl(price)}^FS`;
+      y += fontPrice + gap;
+    }
 
-    if (supplier) {
+    if (supplier && fitsLine(y, fontMed + gap)) {
       zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontMed},${fontMedWidth}^FB${textWidth},1,0,L,0^FD${escapeZpl(supplier)}^FS`;
       y += fontMed + gap;
     }
 
-    if (supplierItem) {
+    if (supplierItem && fitsLine(y, fontSmall + gap)) {
       zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${escapeZpl(supplierItem)}^FS`;
-      y += fontSmall + 2;
+      y += fontSmall + gap;
     }
 
-    const footerGap = 2;
-    if (supplierItem) {
-      if (received) {
-        zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${rcvdPrefix}${escapeZpl(received)}^FS`;
-        y += fontSmall + footerGap;
-      }
-      if (lot) {
-        zpl += `\n^FO${MARGIN_X},${y}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${lotPrefix}${escapeZpl(lot)}^FS`;
-      }
-    } else {
-      const footerBottom = labelLength - 6;
-      if (lot) {
-        const lotY = footerBottom - fontSmall;
-        zpl += `\n^FO${MARGIN_X},${lotY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${lotPrefix}${escapeZpl(lot)}^FS`;
-      }
-      if (received) {
-        const rcvdY = lot
-          ? footerBottom - fontSmall * 2 - footerGap
-          : footerBottom - fontSmall;
-        zpl += `\n^FO${MARGIN_X},${rcvdY}^A0N,${fontSmall},${fontSmallWidth}^FB${textWidth},1,0,L,0^FD${rcvdPrefix}${escapeZpl(received)}^FS`;
-      }
+    // Always anchor rcvd/lot at the bottom so they never collide with the
+    // Data Matrix or stack into supplier lines above.
+    let footY = labelLength - scaleFont(6);
+    for (let i = footerLines.length - 1; i >= 0; i--) {
+      footY -= fontSmall;
+      zpl += appendSmallLine(footY, footerLines[i].prefix, footerLines[i].value);
+      footY -= footerGap;
     }
 
     if (ndcDigits) {
