@@ -49,6 +49,15 @@ ssh luke@172.18.129.154 'sudo journalctl -u prx-api -n 50 --no-pager'
 
 ## Common issues
 
+### Same drug on two invoices — second scan says "already completed"
+
+Completion is tracked **per invoice** (`invoice_id` + `ndc` + `upc`). The lookup
+endpoint must return the **incomplete** invoice when the same product appears on
+multiple recent invoices — not just the newest row by `StatusChangedOn`.
+
+After updating `api-endpoints/new-endpoints.js` on the server, barcode/UPC/NDC
+recent endpoints prefer the first matching invoice that is not yet labeled.
+
 ### Item not found but staff know it was received
 
 The extension searches invoices from the last **7 days** (168 hours; extended on Sun/Mon).

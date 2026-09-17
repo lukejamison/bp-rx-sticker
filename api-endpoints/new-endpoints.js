@@ -21,18 +21,10 @@ function ndcLookupVariants(code) {
     return [...variants];
 }
 
-// ==========================================
-// ENDPOINT 1: Get Recent Invoice by UPC (recent window filter)
-// ==========================================
-// GET /api/items/upc/:upc/recent
-// Returns item if StatusChangedOn or InvoiceDate is within the hours window
+const RECENT_INVOICE_MATCH_LIMIT = 15;
 
-app.get('/api/items/upc/:upc/recent', async (req, res) => {
-    const { upc } = req.params;
-    const { hours = 168 } = req.query; // Default 7 days
-    
-    try {
-        const query = `
+async function queryRecentInvoicesByItemLike(pool, likePattern, hours) {
+    const query = `
             SELECT 
                 id,
                 "InvoiceID",
@@ -46,32 +38,14 @@ app.get('/api/items/upc/:upc/recent', async (req, res) => {
             WHERE "ItemDetails"::text LIKE $1
 ${RECENT_INVOICE_TIME_FILTER}
             ORDER BY "StatusChangedOn" DESC
-            LIMIT 1
+            LIMIT $3
         `;
-        
-        const result = await pool.query(query, [`%"UPC":"${upc}"%`, hours]);
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({ 
-                error: 'Item not found or not received within time window',
-                upc: upc,
-                timeWindow: `${hours} hours`
-            });
-        }
-        
-        const invoice = result.rows[0];
-        const itemDetails = JSON.parse(invoice.ItemDetails);
-        const item = itemDetails.find(i => i.UPC === upc);
-        
-        if (!item) {
-            return res.status(404).json({ 
-                error: 'Item not found in invoice details',
-                upc: upc 
-            });
-        }
+    const result = await pool.query(query, [likePattern, hours, RECENT_INVOICE_MATCH_LIMIT]);
+    return result.rows;
+}
 
-        // Check if this item has already been completed
-        const completedCheck = await pool.query(`
+async function getItemCompletionInfo(pool, invoiceId, upc, ndc) {
+    const completedCheck = await pool.query(`
             SELECT 
                 "scanned_at",
                 "label_printed_at",
@@ -79,43 +53,105 @@ ${RECENT_INVOICE_TIME_FILTER}
             FROM "prx_invoices_completed"
             WHERE "invoice_id" = $1 
               AND "upc" = $2
+              AND "ndc" = $3
             LIMIT 1
-        `, [invoice.id, upc]);
+        `, [invoiceId, upc, ndc]);
+    return completedCheck.rows[0] || null;
+}
 
-        const isCompleted = completedCheck.rows.length > 0;
-        const completionInfo = isCompleted ? completedCheck.rows[0] : null;
-        
-        res.json({
-            item: {
-                itemId: item.ItemID,
-                itemName: item.ItemName,
-                ndc: item.NDC,
-                upc: item.UPC,
-                cost: parseFloat(item.InvoiceCostPerUnit || 0).toFixed(2),
-                lastReceived: new Date(invoice.InvoiceDate).toLocaleDateString('en-US'),
-                supplier: item.SupplierName,
-                supplierItemNumber: item.SupplierItemNumber || '',
-                stockSize: item.StockSize,
-                strength: item.Strength,
-                invoiceQty: item.InvoiceQuantity,
-                receivedQty: item.ReceivedQuantity,
-                onHand: item.CurrentOnHandQuantity
-            },
-            invoice: {
-                id: invoice.id,
-                invoiceNumber: invoice.InvoiceNumber,
-                invoiceDate: invoice.InvoiceDate,
-                statusChangedOn: invoice.StatusChangedOn,
-                supplier: invoice.SupplierName,
-                totalItems: invoice.TotalItems
-            },
-            completed: isCompleted,
-            completionInfo: completionInfo ? {
-                scannedAt: completionInfo.scanned_at,
-                labelPrintedAt: completionInfo.label_printed_at,
-                reprintCount: completionInfo.label_reprint_count
-            } : null
-        });
+/**
+ * Same NDC/UPC often appears on multiple recent invoices. Prefer the first
+ * invoice (newest StatusChangedOn first) where this line is not completed yet.
+ * If every match is already labeled, return the newest completed one.
+ */
+async function pickInvoiceLineItem(pool, invoices, findItem) {
+    let completedFallback = null;
+    for (const invoice of invoices) {
+        const itemDetails = JSON.parse(invoice.ItemDetails);
+        const item = findItem(itemDetails);
+        if (!item) continue;
+        const completionInfo = await getItemCompletionInfo(pool, invoice.id, item.UPC, item.NDC);
+        if (!completionInfo) {
+            return { invoice, item, completionInfo: null };
+        }
+        if (!completedFallback) {
+            completedFallback = { invoice, item, completionInfo };
+        }
+    }
+    return completedFallback;
+}
+
+function formatStickerItemResponse(invoice, item, completionInfo, extra = {}) {
+    const isCompleted = !!completionInfo;
+    return {
+        ...extra,
+        item: {
+            itemId: item.ItemID,
+            itemName: item.ItemName,
+            ndc: item.NDC,
+            upc: item.UPC,
+            cost: parseFloat(item.InvoiceCostPerUnit || 0).toFixed(2),
+            lastReceived: new Date(invoice.InvoiceDate).toLocaleDateString('en-US'),
+            supplier: item.SupplierName,
+            supplierItemNumber: item.SupplierItemNumber || '',
+            stockSize: item.StockSize,
+            strength: item.Strength,
+            invoiceQty: item.InvoiceQuantity,
+            receivedQty: item.ReceivedQuantity,
+            onHand: item.CurrentOnHandQuantity
+        },
+        invoice: {
+            id: invoice.id,
+            invoiceNumber: invoice.InvoiceNumber,
+            invoiceDate: invoice.InvoiceDate,
+            statusChangedOn: invoice.StatusChangedOn,
+            supplier: invoice.SupplierName,
+            totalItems: invoice.TotalItems
+        },
+        completed: isCompleted,
+        completionInfo: completionInfo ? {
+            scannedAt: completionInfo.scanned_at,
+            labelPrintedAt: completionInfo.label_printed_at,
+            reprintCount: completionInfo.label_reprint_count
+        } : null
+    };
+}
+
+// ==========================================
+// ENDPOINT 1: Get Recent Invoice by UPC (recent window filter)
+// ==========================================
+// GET /api/items/upc/:upc/recent
+// Returns item if StatusChangedOn or InvoiceDate is within the hours window
+
+app.get('/api/items/upc/:upc/recent', async (req, res) => {
+    const { upc } = req.params;
+    const { hours = 168 } = req.query; // Default 7 days
+    
+    try {
+        const invoices = await queryRecentInvoicesByItemLike(pool, `%"UPC":"${upc}"%`, hours);
+
+        if (invoices.length === 0) {
+            return res.status(404).json({ 
+                error: 'Item not found or not received within time window',
+                upc: upc,
+                timeWindow: `${hours} hours`
+            });
+        }
+
+        const picked = await pickInvoiceLineItem(
+            pool,
+            invoices,
+            (itemDetails) => itemDetails.find((i) => i.UPC === upc)
+        );
+
+        if (!picked) {
+            return res.status(404).json({ 
+                error: 'Item not found in invoice details',
+                upc: upc 
+            });
+        }
+
+        res.json(formatStickerItemResponse(picked.invoice, picked.item, picked.completionInfo));
         
     } catch (error) {
         console.error('Error fetching recent item by UPC:', error);
@@ -136,90 +172,35 @@ app.get('/api/items/ndc/:ndc/recent', async (req, res) => {
     const { hours = 168 } = req.query;
     
     try {
-        const query = `
-            SELECT 
-                id,
-                "InvoiceID",
-                "InvoiceNumber",
-                "InvoiceDate",
-                "SupplierName",
-                "StatusChangedOn",
-                "ItemDetails",
-                "TotalItems"
-            FROM "prx-invoices"
-            WHERE "ItemDetails"::text LIKE $1
-${RECENT_INVOICE_TIME_FILTER}
-            ORDER BY "StatusChangedOn" DESC
-            LIMIT 1
-        `;
-        
-        const result = await pool.query(query, [`%"NDC":"${ndc}"%`, hours]);
-        
-        if (result.rows.length === 0) {
+        const ndcVariants = ndcLookupVariants(ndc);
+        let invoices = [];
+        for (const variant of ndcVariants) {
+            invoices = await queryRecentInvoicesByItemLike(pool, `%"NDC":"${variant}"%`, hours);
+            if (invoices.length > 0) break;
+        }
+
+        if (invoices.length === 0) {
             return res.status(404).json({ 
                 error: 'Item not found or not received within time window',
                 ndc: ndc,
                 timeWindow: `${hours} hours`
             });
         }
-        
-        const invoice = result.rows[0];
-        const itemDetails = JSON.parse(invoice.ItemDetails);
-        const item = itemDetails.find(i => i.NDC === ndc);
-        
-        if (!item) {
+
+        const picked = await pickInvoiceLineItem(
+            pool,
+            invoices,
+            (itemDetails) => itemDetails.find((i) => ndcVariants.includes(i.NDC))
+        );
+
+        if (!picked) {
             return res.status(404).json({ 
                 error: 'Item not found in invoice details',
                 ndc: ndc 
             });
         }
 
-        // Check if this item has already been completed
-        const completedCheck = await pool.query(`
-            SELECT 
-                "scanned_at",
-                "label_printed_at",
-                "label_reprint_count"
-            FROM "prx_invoices_completed"
-            WHERE "invoice_id" = $1 
-              AND "ndc" = $2
-            LIMIT 1
-        `, [invoice.id, ndc]);
-
-        const isCompleted = completedCheck.rows.length > 0;
-        const completionInfo = isCompleted ? completedCheck.rows[0] : null;
-        
-        res.json({
-            item: {
-                itemId: item.ItemID,
-                itemName: item.ItemName,
-                ndc: item.NDC,
-                upc: item.UPC,
-                cost: parseFloat(item.InvoiceCostPerUnit || 0).toFixed(2),
-                lastReceived: new Date(invoice.InvoiceDate).toLocaleDateString('en-US'),
-                supplier: item.SupplierName,
-                supplierItemNumber: item.SupplierItemNumber || '',
-                stockSize: item.StockSize,
-                strength: item.Strength,
-                invoiceQty: item.InvoiceQuantity,
-                receivedQty: item.ReceivedQuantity,
-                onHand: item.CurrentOnHandQuantity
-            },
-            invoice: {
-                id: invoice.id,
-                invoiceNumber: invoice.InvoiceNumber,
-                invoiceDate: invoice.InvoiceDate,
-                statusChangedOn: invoice.StatusChangedOn,
-                supplier: invoice.SupplierName,
-                totalItems: invoice.TotalItems
-            },
-            completed: isCompleted,
-            completionInfo: completionInfo ? {
-                scannedAt: completionInfo.scanned_at,
-                labelPrintedAt: completionInfo.label_printed_at,
-                reprintCount: completionInfo.label_reprint_count
-            } : null
-        });
+        res.json(formatStickerItemResponse(picked.invoice, picked.item, picked.completionInfo));
         
     } catch (error) {
         console.error('Error fetching recent item by NDC:', error);
@@ -551,42 +532,22 @@ app.get('/api/items/barcode/:code/recent', async (req, res) => {
     const { hours = 168 } = req.query;
     
     try {
-        // Try UPC first
-        const upcQuery = `
-            SELECT 
-                id,
-                "InvoiceID",
-                "InvoiceNumber",
-                "InvoiceDate",
-                "SupplierName",
-                "StatusChangedOn",
-                "ItemDetails",
-                "TotalItems"
-            FROM "prx-invoices"
-            WHERE "ItemDetails"::text LIKE $1
-${RECENT_INVOICE_TIME_FILTER}
-            ORDER BY "StatusChangedOn" DESC
-            LIMIT 1
-        `;
-        
-        let result = await pool.query(upcQuery, [`%"UPC":"${code}"%`, hours]);
+        let invoices = await queryRecentInvoicesByItemLike(pool, `%"UPC":"${code}"%`, hours);
         let searchType = 'UPC';
         let matchedCode = code;
-        let item = null;
-        
-        if (result.rows.length === 0) {
+
+        if (invoices.length === 0) {
             for (const ndcVariant of ndcLookupVariants(code)) {
-                const ndcResult = await pool.query(upcQuery, [`%"NDC":"${ndcVariant}"%`, hours]);
-                if (ndcResult.rows.length > 0) {
-                    result = ndcResult;
+                invoices = await queryRecentInvoicesByItemLike(pool, `%"NDC":"${ndcVariant}"%`, hours);
+                if (invoices.length > 0) {
                     searchType = 'NDC';
                     matchedCode = ndcVariant;
                     break;
                 }
             }
         }
-        
-        if (result.rows.length === 0) {
+
+        if (invoices.length === 0) {
             return res.status(404).json({ 
                 error: 'Item not found or not received within time window',
                 code: code,
@@ -594,70 +555,30 @@ ${RECENT_INVOICE_TIME_FILTER}
                 searchedAs: ['UPC', 'NDC']
             });
         }
-        
-        const invoice = result.rows[0];
-        const itemDetails = JSON.parse(invoice.ItemDetails);
-        
-        if (searchType === 'UPC') {
-            item = itemDetails.find(i => i.UPC === code);
-        } else {
-            item = itemDetails.find(i => ndcLookupVariants(code).includes(i.NDC));
-        }
-        
-        if (!item) {
+
+        const ndcVariants = ndcLookupVariants(code);
+        const picked = await pickInvoiceLineItem(
+            pool,
+            invoices,
+            (itemDetails) => {
+                if (searchType === 'UPC') {
+                    return itemDetails.find((i) => i.UPC === code);
+                }
+                return itemDetails.find((i) => ndcVariants.includes(i.NDC));
+            }
+        );
+
+        if (!picked) {
             return res.status(404).json({ 
                 error: 'Item not found in invoice details',
                 code: code 
             });
         }
 
-        // Check completion status
-        const completedCheck = await pool.query(`
-            SELECT 
-                "scanned_at",
-                "label_printed_at",
-                "label_reprint_count"
-            FROM "prx_invoices_completed"
-            WHERE "invoice_id" = $1 
-              AND ("upc" = $2 OR "ndc" = $2)
-            LIMIT 1
-        `, [invoice.id, code]);
-
-        const isCompleted = completedCheck.rows.length > 0;
-        const completionInfo = isCompleted ? completedCheck.rows[0] : null;
-        
-        res.json({
-            searchType: searchType,
-            item: {
-                itemId: item.ItemID,
-                itemName: item.ItemName,
-                ndc: item.NDC,
-                upc: item.UPC,
-                cost: parseFloat(item.InvoiceCostPerUnit || 0).toFixed(2),
-                lastReceived: new Date(invoice.InvoiceDate).toLocaleDateString('en-US'),
-                supplier: item.SupplierName,
-                supplierItemNumber: item.SupplierItemNumber || '',
-                stockSize: item.StockSize,
-                strength: item.Strength,
-                invoiceQty: item.InvoiceQuantity,
-                receivedQty: item.ReceivedQuantity,
-                onHand: item.CurrentOnHandQuantity
-            },
-            invoice: {
-                id: invoice.id,
-                invoiceNumber: invoice.InvoiceNumber,
-                invoiceDate: invoice.InvoiceDate,
-                statusChangedOn: invoice.StatusChangedOn,
-                supplier: invoice.SupplierName,
-                totalItems: invoice.TotalItems
-            },
-            completed: isCompleted,
-            completionInfo: completionInfo ? {
-                scannedAt: completionInfo.scanned_at,
-                labelPrintedAt: completionInfo.label_printed_at,
-                reprintCount: completionInfo.label_reprint_count
-            } : null
-        });
+        res.json(formatStickerItemResponse(picked.invoice, picked.item, picked.completionInfo, {
+            searchType,
+            matchedCode,
+        }));
         
     } catch (error) {
         console.error('Error fetching item by barcode:', error);
