@@ -4,13 +4,6 @@
  * Date: 2026-02-08
  */
 
-// Match if either status change OR invoice date falls inside the lookup window.
-const RECENT_INVOICE_TIME_FILTER = `
-              AND (
-                "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $2
-                OR "InvoiceDate" >= NOW() - INTERVAL '1 hour' * $2
-              )`;
-
 function ndcLookupVariants(code) {
     const digits = String(code || '').replace(/\D/g, '');
     if (digits.length < 10 || digits.length > 11) return [code];
@@ -21,11 +14,58 @@ function ndcLookupVariants(code) {
     return [...variants];
 }
 
-const RECENT_INVOICE_MATCH_LIMIT = 15;
+const RECENT_INVOICE_MATCH_LIMIT = 40;
 
-async function queryRecentInvoicesByItemLike(pool, likePattern, hours) {
+function comparableDigits(value) {
+    return String(value || '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+function codesEquivalent(a, b) {
+    const left = comparableDigits(a);
+    const right = comparableDigits(b);
+    return left.length >= 8 && left === right;
+}
+
+function collectLookupCodes(primary, extra) {
+    const codes = [];
+    const seen = new Set();
+    const add = (value) => {
+        const code = String(value || '').trim();
+        if (code.length < 8 || seen.has(code)) return;
+        seen.add(code);
+        codes.push(code);
+        for (const variant of ndcLookupVariants(code)) {
+            const normalized = String(variant || '').trim();
+            if (normalized.length < 8 || seen.has(normalized)) continue;
+            seen.add(normalized);
+            codes.push(normalized);
+        }
+    };
+    add(primary);
+    String(extra || '').split(',').forEach(add);
+    return codes.slice(0, 12);
+}
+
+function lineMatchesAnyCode(item, codes) {
+    return codes.some((code) => codesEquivalent(item?.UPC, code) || codesEquivalent(item?.NDC, code));
+}
+
+function completionMatchesLine(row, item) {
+    // Same invoice only (the caller already filtered by invoice id).
+    // NDC or UPC is enough so a scanned GTIN and the invoice's own code
+    // still recognize the line, without marking a different invoice done.
+    return codesEquivalent(row.ndc, item?.NDC) || codesEquivalent(row.upc, item?.UPC);
+}
+
+async function queryRecentInvoicesForCodes(pool, codes, hours) {
+    const unique = [...new Set(codes.map((code) => String(code || '').trim()).filter((code) => code.length >= 8))].slice(0, 12);
+    if (unique.length === 0) return [];
+
+    const patterns = unique.map((code) => `%${code.replace(/[\\%_]/g, '')}%`);
+    const likes = patterns.map((_, index) => `"ItemDetails"::text LIKE $${index + 2}`).join(' OR ');
+    const limitParam = patterns.length + 2;
     const query = `
-            SELECT 
+            SELECT
                 id,
                 "InvoiceID",
                 "InvoiceNumber",
@@ -35,47 +75,68 @@ async function queryRecentInvoicesByItemLike(pool, likePattern, hours) {
                 "ItemDetails",
                 "TotalItems"
             FROM "prx-invoices"
-            WHERE "ItemDetails"::text LIKE $1
-${RECENT_INVOICE_TIME_FILTER}
-            ORDER BY "StatusChangedOn" DESC
-            LIMIT $3
+            WHERE (${likes})
+              AND (
+                "StatusChangedOn" >= NOW() - INTERVAL '1 hour' * $1
+                OR "InvoiceDate" >= NOW() - INTERVAL '1 hour' * $1
+              )
+            ORDER BY "StatusChangedOn" DESC NULLS LAST
+            LIMIT $${limitParam}
         `;
-    const result = await pool.query(query, [likePattern, hours, RECENT_INVOICE_MATCH_LIMIT]);
+    const result = await pool.query(query, [hours, ...patterns, RECENT_INVOICE_MATCH_LIMIT]);
     return result.rows;
 }
 
-async function getItemCompletionInfo(pool, invoiceId, upc, ndc) {
-    const completedCheck = await pool.query(`
-            SELECT 
+/**
+ * Same drug often sits on more than one open invoice (qty 2 on one, qty 1 on
+ * another). Walk newest-first and return the first line that is not labeled
+ * yet. Only say "already completed" when every matching line is done.
+ * Completion never crosses invoice ids.
+ */
+async function pickOpenInvoiceLine(pool, invoices, codes) {
+    const parsed = [];
+    for (const invoice of invoices) {
+        let itemDetails;
+        try {
+            itemDetails = typeof invoice.ItemDetails === 'string'
+                ? JSON.parse(invoice.ItemDetails)
+                : invoice.ItemDetails;
+        } catch {
+            continue;
+        }
+        if (!Array.isArray(itemDetails)) continue;
+        const item = itemDetails.find((entry) => lineMatchesAnyCode(entry, codes));
+        if (item) parsed.push({ invoice, item });
+    }
+    if (parsed.length === 0) return null;
+
+    const ids = [...new Set(parsed.map((entry) => entry.invoice.id))];
+    const completedResult = await pool.query(`
+            SELECT
+                "invoice_id",
+                "ndc",
+                "upc",
                 "scanned_at",
                 "label_printed_at",
                 "label_reprint_count"
             FROM "prx_invoices_completed"
-            WHERE "invoice_id" = $1 
-              AND "upc" = $2
-              AND "ndc" = $3
-            LIMIT 1
-        `, [invoiceId, upc, ndc]);
-    return completedCheck.rows[0] || null;
-}
+            WHERE "invoice_id" = ANY($1::uuid[])
+        `, [ids]);
 
-/**
- * Same NDC/UPC often appears on multiple recent invoices. Prefer the first
- * invoice (newest StatusChangedOn first) where this line is not completed yet.
- * If every match is already labeled, return the newest completed one.
- */
-async function pickInvoiceLineItem(pool, invoices, findItem) {
     let completedFallback = null;
-    for (const invoice of invoices) {
-        const itemDetails = JSON.parse(invoice.ItemDetails);
-        const item = findItem(itemDetails);
-        if (!item) continue;
-        const completionInfo = await getItemCompletionInfo(pool, invoice.id, item.UPC, item.NDC);
+    for (const entry of parsed) {
+        const completionInfo = completedResult.rows.find((row) =>
+            String(row.invoice_id) === String(entry.invoice.id) && completionMatchesLine(row, entry.item)
+        );
         if (!completionInfo) {
-            return { invoice, item, completionInfo: null };
+            return { invoice: entry.invoice, item: entry.item, completionInfo: null };
         }
         if (!completedFallback) {
-            completedFallback = { invoice, item, completionInfo };
+            completedFallback = {
+                invoice: entry.invoice,
+                item: entry.item,
+                completionInfo
+            };
         }
     }
     return completedFallback;
@@ -128,7 +189,8 @@ app.get('/api/items/upc/:upc/recent', async (req, res) => {
     const { hours = 168 } = req.query; // Default 7 days
     
     try {
-        const invoices = await queryRecentInvoicesByItemLike(pool, `%"UPC":"${upc}"%`, hours);
+        const codes = collectLookupCodes(upc);
+        const invoices = await queryRecentInvoicesForCodes(pool, codes, hours);
 
         if (invoices.length === 0) {
             return res.status(404).json({ 
@@ -138,11 +200,7 @@ app.get('/api/items/upc/:upc/recent', async (req, res) => {
             });
         }
 
-        const picked = await pickInvoiceLineItem(
-            pool,
-            invoices,
-            (itemDetails) => itemDetails.find((i) => i.UPC === upc)
-        );
+        const picked = await pickOpenInvoiceLine(pool, invoices, codes);
 
         if (!picked) {
             return res.status(404).json({ 
@@ -172,12 +230,8 @@ app.get('/api/items/ndc/:ndc/recent', async (req, res) => {
     const { hours = 168 } = req.query;
     
     try {
-        const ndcVariants = ndcLookupVariants(ndc);
-        let invoices = [];
-        for (const variant of ndcVariants) {
-            invoices = await queryRecentInvoicesByItemLike(pool, `%"NDC":"${variant}"%`, hours);
-            if (invoices.length > 0) break;
-        }
+        const codes = collectLookupCodes(ndc);
+        const invoices = await queryRecentInvoicesForCodes(pool, codes, hours);
 
         if (invoices.length === 0) {
             return res.status(404).json({ 
@@ -187,11 +241,7 @@ app.get('/api/items/ndc/:ndc/recent', async (req, res) => {
             });
         }
 
-        const picked = await pickInvoiceLineItem(
-            pool,
-            invoices,
-            (itemDetails) => itemDetails.find((i) => ndcVariants.includes(i.NDC))
-        );
+        const picked = await pickOpenInvoiceLine(pool, invoices, codes);
 
         if (!picked) {
             return res.status(404).json({ 
@@ -529,55 +579,40 @@ app.get('/api/stats/completed', async (req, res) => {
 
 app.get('/api/items/barcode/:code/recent', async (req, res) => {
     const { code } = req.params;
-    const { hours = 168 } = req.query;
+    const { hours = 168, candidates = '' } = req.query;
     
     try {
-        let invoices = await queryRecentInvoicesByItemLike(pool, `%"UPC":"${code}"%`, hours);
-        let searchType = 'UPC';
-        let matchedCode = code;
-
-        if (invoices.length === 0) {
-            for (const ndcVariant of ndcLookupVariants(code)) {
-                invoices = await queryRecentInvoicesByItemLike(pool, `%"NDC":"${ndcVariant}"%`, hours);
-                if (invoices.length > 0) {
-                    searchType = 'NDC';
-                    matchedCode = ndcVariant;
-                    break;
-                }
-            }
-        }
+        // `candidates` lets the extension send every GS1-derived code in one
+        // request. searchedAllCandidates tells the client not to repeat the
+        // lookup one code at a time.
+        const codes = collectLookupCodes(code, candidates);
+        const invoices = await queryRecentInvoicesForCodes(pool, codes, hours);
 
         if (invoices.length === 0) {
             return res.status(404).json({ 
                 error: 'Item not found or not received within time window',
                 code: code,
                 timeWindow: `${hours} hours`,
-                searchedAs: ['UPC', 'NDC']
+                searchedAs: ['UPC', 'NDC'],
+                searchedAllCandidates: true
             });
         }
 
-        const ndcVariants = ndcLookupVariants(code);
-        const picked = await pickInvoiceLineItem(
-            pool,
-            invoices,
-            (itemDetails) => {
-                if (searchType === 'UPC') {
-                    return itemDetails.find((i) => i.UPC === code);
-                }
-                return itemDetails.find((i) => ndcVariants.includes(i.NDC));
-            }
-        );
+        const picked = await pickOpenInvoiceLine(pool, invoices, codes);
 
         if (!picked) {
             return res.status(404).json({ 
                 error: 'Item not found in invoice details',
-                code: code 
+                code: code,
+                searchedAllCandidates: true
             });
         }
 
+        const searchType = codesEquivalent(picked.item.UPC, code) ? 'UPC' : 'NDC';
         res.json(formatStickerItemResponse(picked.invoice, picked.item, picked.completionInfo, {
             searchType,
-            matchedCode,
+            matchedCode: code,
+            searchedAllCandidates: true,
         }));
         
     } catch (error) {

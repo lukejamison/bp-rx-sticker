@@ -10,7 +10,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 
-const BRIDGE_VERSION = '0.4.6';
+const BRIDGE_VERSION = '0.4.7';
 const BRIDGE_HOST = process.env.PRINT_BRIDGE_HOST || '127.0.0.1';
 const BRIDGE_PORT = Number(process.env.PRINT_BRIDGE_PORT || 9101);
 const DEFAULT_PRINTER_IP = process.env.PRINTER_IP || '172.18.129.123';
@@ -58,10 +58,15 @@ process.stdout.on('error', (err) => {
   }
 });
 
-// Fire-and-forget alert to Better Stack for WARN/ERROR events (and the one INFO
-// startup event below, which doubles as a connectivity self-test). Never lets a
-// Better Stack outage affect printing, and never routes its own failures back
-// through log() -- that would loop.
+// Fire-and-forget alert to Better Stack for failures that need a person:
+// printer/bridge errors and timeouts. Routine warnings stay in the local log.
+// Never lets a Better Stack outage affect printing, and never routes its own
+// failures back through log() -- that would loop.
+function shouldAlert(level, message) {
+  if (level === 'ERROR') return true;
+  if (level !== 'WARN') return false;
+  return /timed out|printer socket|print failed|uncaught|unhandled/i.test(String(message || ''));
+}
 function sendToBetterStack(level, message, meta) {
   if (!BETTERSTACK_SOURCE_TOKEN || !BETTERSTACK_INGESTING_HOST) return;
 
@@ -104,8 +109,8 @@ function sendToBetterStack(level, message, meta) {
 function log(level, message, meta) {
   const line = `[${new Date().toISOString()}] [${level}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}`;
   fs.appendFile(LOG_PATH, `${line}\n`, () => {});
-  if (level === 'WARN' || level === 'ERROR') {
-    sendToBetterStack(level, message, meta);
+  if (shouldAlert(level, message)) {
+    sendToBetterStack(level === 'ERROR' ? 'ERROR' : 'WARN', message, meta);
   }
   if (stdoutBroken) return;
   try {
@@ -446,12 +451,6 @@ function tryListen() {
       printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
       pid: process.pid,
       logFile: LOG_PATH,
-    });
-    // Startup event always fires (not just WARN/ERROR) so configuring Better
-    // Stack gives an immediate, easy way to confirm it's wired up correctly --
-    // restart the bridge and watch for this line in the Better Stack dashboard.
-    sendToBetterStack('INFO', 'print bridge started', {
-      printer: `${DEFAULT_PRINTER_IP}:${PRINTER_PORT}`,
     });
   });
 }

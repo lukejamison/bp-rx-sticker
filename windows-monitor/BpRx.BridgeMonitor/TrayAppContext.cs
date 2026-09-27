@@ -33,7 +33,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open status", null, (_, _) => ShowStatusForm());
-        menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync());
+        menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync(force: true));
         menu.Items.Add("Start print bridge", null, async (_, _) => await RunBridgeActionAsync(_coordinator.StartBridgeAsync, "Started"));
         menu.Items.Add("Stop print bridge", null, async (_, _) => await RunBridgeActionAsync(_coordinator.StopBridgeAsync, "Stopped"));
         menu.Items.Add("Restart print bridge", null, async (_, _) => await RestartBridgeAsync());
@@ -69,20 +69,31 @@ internal sealed class TrayAppContext : ApplicationContext
         _statusForm.Show();
     }
 
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(bool force = false)
     {
         try
         {
-            var health = await _coordinator.CheckHealthAsync();
+            var previous = _lastHealth?.State;
+            var health = await _coordinator.CheckHealthAsync(force: force);
             _lastHealth = health;
             SetTrayIcon(health.State);
-            _trayIcon.Text = $"BP RX — {health.Summary}";
+            _trayIcon.Text = TruncateTrayText($"BP RX — {health.Summary}");
             _statusForm?.UpdateHealth(health);
+
+            if (previous is not null && previous != HealthState.Unhealthy && health.State == HealthState.Unhealthy)
+            {
+                _trayIcon.ShowBalloonTip(5000, "BP RX", health.Summary, ToolTipIcon.Error);
+            }
         }
         catch (Exception ex)
         {
             _coordinator.Logs.WriteMonitorLog("ERROR", $"Refresh failed: {ex.Message}");
         }
+    }
+
+    private static string TruncateTrayText(string text)
+    {
+        return text.Length <= 63 ? text : text[..60] + "...";
     }
 
     private async Task RunBridgeActionAsync(Func<CancellationToken, Task<(bool Ok, string Message)>> action, string verb)
@@ -92,7 +103,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _coordinator.Logs.WriteMonitorLog(ok ? "INFO" : "ERROR", $"{verb} bridge: {message}");
         _trayIcon.ShowBalloonTip(5000, "BP RX", message, ok ? ToolTipIcon.Info : ToolTipIcon.Error);
         await Task.Delay(1500);
-        await RefreshAsync();
+        await RefreshAsync(force: true);
     }
 
     private async Task RestartBridgeAsync()
@@ -102,7 +113,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _coordinator.Logs.WriteMonitorLog(ok ? "INFO" : "ERROR", $"Restart bridge: {message}");
         _trayIcon.ShowBalloonTip(5000, "BP RX", message, ok ? ToolTipIcon.Info : ToolTipIcon.Error);
         await Task.Delay(2000);
-        await RefreshAsync();
+        await RefreshAsync(force: true);
     }
 
     private async Task SendLogsAsync()

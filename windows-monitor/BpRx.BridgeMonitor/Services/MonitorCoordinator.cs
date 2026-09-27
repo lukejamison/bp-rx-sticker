@@ -4,12 +4,20 @@ namespace BpRx.BridgeMonitor.Services;
 
 public sealed class MonitorCoordinator
 {
+    private static readonly TimeSpan SlowCheckInterval = TimeSpan.FromSeconds(60);
+
     private readonly SettingsStore _settingsStore = new();
     private readonly BridgeHealthService _bridgeHealth = new();
     private readonly PrinterProbeService _printerProbe = new();
     private readonly TaskSupervisorService _taskSupervisor = new();
     private readonly LogCollectorService _logs = new();
     private readonly WebhookLogUploader _uploader = new();
+    private DateTimeOffset _lastPrinterProbe = DateTimeOffset.MinValue;
+    private bool _lastPrinterOk;
+    private string? _lastPrinterError;
+    private DateTimeOffset _lastTaskCheck = DateTimeOffset.MinValue;
+    private TaskStatusSnapshot? _cachedTask;
+    private HealthState? _lastLoggedState;
 
     public LogCollectorService Logs => _logs;
 
@@ -17,7 +25,7 @@ public sealed class MonitorCoordinator
 
     public void SaveSettings(MonitorSettings settings) => _settingsStore.Save(settings);
 
-    public async Task<HealthSnapshot> CheckHealthAsync(CancellationToken ct = default)
+    public async Task<HealthSnapshot> CheckHealthAsync(CancellationToken ct = default, bool force = false)
     {
         var settings = Settings;
         var checkedAt = DateTimeOffset.Now;
@@ -35,11 +43,11 @@ public sealed class MonitorCoordinator
             if (int.TryParse(portText, out var parsedPort)) printerPort = parsedPort;
         }
 
-        var (printerOk, printerError) = bridgeOk
-            ? await _printerProbe.ProbeAsync(printerIp ?? "", printerPort, ct)
-            : (false, "Bridge down — skipped printer probe");
+        // Opening the printer's raw port on every poll contends with real print
+        // jobs. Check it about once a minute, or immediately when asked.
+        var (printerOk, printerError) = await ProbePrinterAsync(bridgeOk, printerIp, printerPort, force, ct);
 
-        var taskStatus = await _taskSupervisor.GetTaskStatusAsync(settings.ScheduledTaskName, ct);
+        var taskStatus = await GetTaskStatusAsync(settings.ScheduledTaskName, force, ct);
 
         var state = ResolveState(bridgeOk, printerOk, taskStatus.State);
 
@@ -61,9 +69,53 @@ public sealed class MonitorCoordinator
             ScheduledTaskError = taskStatus.Error,
         };
 
-        _logs.WriteMonitorLog("INFO", $"Health={state} elevated={snapshot.IsElevated} bridge={bridgeOk} printer={printerOk} task={taskStatus.State ?? "?"}");
+        if (_lastLoggedState != state)
+        {
+            _logs.WriteMonitorLog(
+                state == HealthState.Healthy ? "INFO" : "WARN",
+                $"Health={state} elevated={snapshot.IsElevated} bridge={bridgeOk} printer={printerOk} task={taskStatus.State ?? "?"}");
+            _lastLoggedState = state;
+        }
 
         return snapshot;
+    }
+
+    private async Task<(bool Ok, string? Error)> ProbePrinterAsync(
+        bool bridgeOk,
+        string? printerIp,
+        int printerPort,
+        bool force,
+        CancellationToken ct)
+    {
+        if (!bridgeOk)
+        {
+            return (false, "Bridge down — skipped printer probe");
+        }
+
+        var fresh = force || DateTimeOffset.Now - _lastPrinterProbe >= SlowCheckInterval;
+        if (!fresh)
+        {
+            return (_lastPrinterOk, _lastPrinterError);
+        }
+
+        var probed = await _printerProbe.ProbeAsync(printerIp ?? "", printerPort, ct);
+        _lastPrinterProbe = DateTimeOffset.Now;
+        _lastPrinterOk = probed.Ok;
+        _lastPrinterError = probed.Error;
+        return probed;
+    }
+
+    private async Task<TaskStatusSnapshot> GetTaskStatusAsync(string taskName, bool force, CancellationToken ct)
+    {
+        var fresh = force || _cachedTask is null || DateTimeOffset.Now - _lastTaskCheck >= SlowCheckInterval;
+        if (!fresh && _cachedTask is not null)
+        {
+            return _cachedTask;
+        }
+
+        _cachedTask = await _taskSupervisor.GetTaskStatusAsync(taskName, ct);
+        _lastTaskCheck = DateTimeOffset.Now;
+        return _cachedTask;
     }
 
     public Task<(bool Ok, string Message)> RestartBridgeAsync(CancellationToken ct = default) =>

@@ -8,13 +8,12 @@ function log(...args) {
   console.log(LOG_PREFIX, ...args);
 }
 
-function warn(...args) {
-  console.warn(LOG_PREFIX, ...args);
-  const [message, ...rest] = args;
-  sendToBetterStack('WARN', message, rest.length ? { details: rest } : undefined);
+function alertSerious(message, context) {
+  console.error(LOG_PREFIX, message, context || '');
+  sendToBetterStack('ERROR', message, context);
 }
 
-// Catches service-worker-level crashes that never go through warn() above --
+// Catches service-worker-level crashes that never go through alertSerious() --
 // mirrors the print bridge's uncaughtException/unhandledRejection handlers.
 self.addEventListener('error', (event) => {
   sendToBetterStack('ERROR', event.message || 'Uncaught error in background worker', {
@@ -78,12 +77,12 @@ async function processScan(raw, meta = {}) {
   const apiStart = Date.now();
 
   if (!isTargetPage(meta.page)) {
-    warn('Rejected scan from non-target page', meta.page);
+    log('Rejected scan from non-target page', meta.page);
     return { ok: false, reason: 'wrong_page' };
   }
 
   if (!meta.source?.startsWith('scan:')) {
-    warn('Rejected non-barcode scan source', meta.source);
+    log('Rejected non-barcode scan source', meta.source);
     return { ok: false, reason: 'not_barcode_scan' };
   }
 
@@ -129,7 +128,12 @@ async function processScan(raw, meta = {}) {
   try {
     lookup = await lookupWithCandidates(lookupCodes, settings);
   } catch (err) {
-    warn('lookup failed', err.message, { tried: err.tried || lookupCodes, source: meta.source });
+    const lookupContext = { message: err.message, tried: err.tried || lookupCodes, source: meta.source };
+    if (err.status >= 500 || !err.status) {
+      alertSerious('Invoice lookup failed', lookupContext);
+    } else {
+      log('lookup miss', err.message, lookupContext);
+    }
     const apiMs = Date.now() - apiStart;
     const payload = {
       ok: false,
@@ -190,7 +194,7 @@ function buildCompletionPayload(result) {
     invoiceNumber: invoice.invoiceNumber,
     itemId: item.itemId,
     ndc: item.ndc,
-    upc: result?.parsed?.upc || result?.matchedCode || item.upc,
+    upc: item.upc || result?.parsed?.upc || result?.matchedCode,
     itemName: item.itemName,
     supplierName: item.supplier,
     invoiceDate: invoice.invoiceDate,
@@ -205,10 +209,12 @@ function buildCompletionPayload(result) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'REMOTE_LOG') {
-    sendToBetterStack(message.level || 'WARN', message.message, {
-      source: 'content-script',
-      ...message.context,
-    });
+    if (message.level === 'ERROR') {
+      sendToBetterStack('ERROR', message.message, {
+        source: 'content-script',
+        ...message.context,
+      });
+    }
     return false;
   }
 
@@ -224,7 +230,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const payload = buildCompletionPayload(message.result);
         if (!payload.invoiceId || !payload.ndc || !payload.upc) {
-          warn('MARK_COMPLETED skipped — missing required fields', payload);
+          log('MARK_COMPLETED skipped — missing required fields', payload);
           sendResponse({ ok: false, error: 'Missing invoiceId/ndc/upc' });
           return;
         }
@@ -235,7 +241,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } catch (err) {
         // Non-fatal — the label already printed. This only affects whether the
         // *next* scan of this item gets recognized as already handled.
-        warn('MARK_COMPLETED failed (non-blocking)', err.message);
+        alertSerious('Could not mark invoice line completed', { message: err.message });
         sendResponse({ ok: false, error: err.message });
       }
     })();
@@ -252,22 +258,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then((data) => {
         const ms = Date.now() - printStart;
         log('PRINT_ZPL ok', { ms, ...data });
-        // This handler only ever runs for real (non-mock) prints -- maybeprintLabels()
-        // in onescan.js never calls printLabels() when mockPrint is on. That makes this
-        // the one authoritative "a physical label actually printed" signal, which was
-        // previously local-console-only. Forwarding it remotely closes the gap where a
-        // suspected bulk/phantom-scan event (see "Multiple new items detected...") could
-        // not be confirmed or ruled out against an actual print from Better Stack alone.
-        sendToBetterStack('INFO', 'Real label printed', {
-          labelCount,
-          ms,
-          source: meta.source,
-          ...meta,
-        });
         sendResponse({ ok: true, ...data });
       })
       .catch((err) => {
-        warn('PRINT_ZPL failed', err.message, { ms: Date.now() - printStart, ...meta });
+        alertSerious('Print failed', { message: err.message, ms: Date.now() - printStart, ...meta });
         sendResponse({
           ok: false,
           error: `${err.message}. Start: node extension/print-bridge/server.js`,
@@ -312,14 +306,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const data = await printZplViaBridge(zpl, printSettings);
         const ms = Date.now() - printStart;
         log('REPRINT_LAST ok', { ms, ...data });
-        sendToBetterStack('INFO', 'Real label printed (manual reprint)', {
-          labelCount,
-          ms,
-          itemName: lastResult.item.itemName,
-          gtin: lastResult.parsed?.gtin,
-          ndc: lastResult.item.ndc,
-          upc: lastResult.parsed?.upc || lastResult.matchedCode || lastResult.item.upc,
-        });
         sendResponse({
           ok: true,
           ...data,
@@ -328,7 +314,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       })
       .catch((err) => {
-        warn('REPRINT_LAST failed', err.message);
+        alertSerious('Reprint failed', { message: err.message });
         sendResponse({ ok: false, error: err.message });
       });
     return true;

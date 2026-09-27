@@ -8,6 +8,13 @@ fixes — this file is just the terse "what changed" log.
 Bridge version shown here matches `BRIDGE_VERSION` in `server.js` and the response
 from `GET /health`.
 
+## [0.4.7] - 2026-09-26
+
+### Changed — quieter Better Stack alerts
+
+- Only printer failures, timeouts, and crashes are sent to Better Stack.
+- Routine warnings (client disconnects, header mismatches, startup) stay in the local log.
+
 ## [0.4.6] - 2026-07-07
 
 ### Added — optional Better Stack (Logtail) alerting

@@ -67,26 +67,26 @@ public sealed class StatusForm : Form
 
         buttonRow.Controls.Add(MakeButton("Refresh", async (_, _) =>
         {
-            var health = await _coordinator.CheckHealthAsync();
+            var health = await _coordinator.CheckHealthAsync(force: true);
             UpdateHealth(health);
         }));
         buttonRow.Controls.Add(MakeButton("Start bridge", async (_, _) =>
         {
             var (ok, msg) = await _coordinator.StartBridgeAsync();
             SetActionMessage(msg, ok);
-            UpdateHealth(await _coordinator.CheckHealthAsync());
+            UpdateHealth(await _coordinator.CheckHealthAsync(force: true));
         }));
         buttonRow.Controls.Add(MakeButton("Stop bridge", async (_, _) =>
         {
             var (ok, msg) = await _coordinator.StopBridgeAsync();
             SetActionMessage(msg, ok);
-            UpdateHealth(await _coordinator.CheckHealthAsync());
+            UpdateHealth(await _coordinator.CheckHealthAsync(force: true));
         }));
         buttonRow.Controls.Add(MakeButton("Restart bridge", async (_, _) =>
         {
             var (ok, msg) = await _coordinator.RestartBridgeAsync();
             SetActionMessage(msg, ok);
-            UpdateHealth(await _coordinator.CheckHealthAsync());
+            UpdateHealth(await _coordinator.CheckHealthAsync(force: true));
         }));
         buttonRow.Controls.Add(MakeButton("Send logs", async (_, _) =>
         {

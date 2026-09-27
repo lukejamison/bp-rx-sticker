@@ -1,320 +1,327 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BP RX Label Preview - 1" x 1"</title>
-    <style>
-        body {
-            font-family: 'Courier New', monospace;
-            background: #f0f0f0;
-            padding: 20px;
-            margin: 0;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        h1 {
-            font-family: Arial, sans-serif;
-            color: #333;
-            margin-bottom: 10px;
-        }
-        
-        .info {
-            font-family: Arial, sans-serif;
-            color: #666;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: #f9f9f9;
-            border-left: 4px solid #4CAF50;
-        }
-        
-        .label-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, 1in);
-            gap: 0.25in;
-            margin-top: 20px;
-        }
-        
-        /* Actual 1" x 1" label */
-        .label {
-            width: 1in;
-            height: 1in;
-            border: 2px solid #000;
-            padding: 0.05in;
-            box-sizing: border-box;
-            background: white;
-            position: relative;
-            page-break-inside: avoid;
-        }
-        
-        .label-content {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            font-size: 7pt;
-            line-height: 1.1;
-        }
-        
-        .item-name {
-            font-weight: bold;
-            font-size: 8pt;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .ndc {
-            font-size: 7pt;
-            margin: 1px 0;
-        }
-        
-        .cost {
-            font-size: 9pt;
-            font-weight: bold;
-        }
-        
-        .date-row, .supplier-row {
-            font-size: 6pt;
-        }
-        
-        .print-time {
-            font-size: 5pt;
-            color: #666;
-            text-align: right;
-            margin-top: 2px;
-        }
-        
-        .label-number {
-            position: absolute;
-            top: -20px;
-            left: 0;
-            font-family: Arial, sans-serif;
-            font-size: 10pt;
-            color: #999;
-        }
-        
-        @media print {
-            body {
-                background: white;
-                padding: 0;
-            }
-            
-            .container {
-                max-width: none;
-                padding: 0;
-                box-shadow: none;
-            }
-            
-            h1, .info, .no-print {
-                display: none;
-            }
-            
-            .label {
-                margin: 0;
-                page-break-inside: avoid;
-            }
-            
-            .label-number {
-                display: none;
-            }
-        }
-        
-        .controls {
-            margin: 20px 0;
-            padding: 15px;
-            background: #e3f2fd;
-            border-radius: 4px;
-        }
-        
-        .controls button {
-            background: #2196F3;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 10px;
-            font-size: 14px;
-        }
-        
-        .controls button:hover {
-            background: #1976D2;
-        }
-        
-        .sample-data {
-            font-family: 'Courier New', monospace;
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 4px;
-            margin: 20px 0;
-            font-size: 12px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BP RX label preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1a1a1a;
+      --muted: #5c5c5c;
+      --line: #d7d7d7;
+      --paper: #f4f1ea;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      margin: 0 0 8px;
+    }
+
+    .lede {
+      max-width: 62ch;
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0 0 28px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 22px;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .card h2 {
+      font-size: 15px;
+      margin: 0 0 4px;
+    }
+
+    .card p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .stage {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+    }
+
+    .label {
+      position: relative;
+      background: white;
+      border: 1px solid #111;
+      overflow: hidden;
+      flex: none;
+    }
+
+    .label.actual {
+      width: 1in;
+      height: 1in;
+    }
+
+    .label.large {
+      width: 3in;
+      height: 3in;
+    }
+
+    .field {
+      position: absolute;
+      overflow: hidden;
+      white-space: pre-wrap;
+      line-height: 1;
+      font-family: "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+      color: #111;
+    }
+
+    .field.price {
+      font-weight: 700;
+    }
+
+    .dm {
+      position: absolute;
+      border: 1px solid #111;
+      background:
+        repeating-linear-gradient(90deg, #111 0 2px, transparent 2px 5px),
+        repeating-linear-gradient(#111 0 2px, transparent 2px 5px);
+      background-color: white;
+    }
+
+    .caption {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .warn {
+      color: #8a1f1f;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    .zpl {
+      margin-top: 14px;
+    }
+
+    .zpl summary {
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .zpl pre {
+      margin: 8px 0 0;
+      padding: 12px;
+      background: #1c1c1c;
+      color: #f3f0e8;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.45;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    .zpl button {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>BP RX Label Preview</h1>
-        <div class="info">
-            <strong>Label Size:</strong> 1" x 1" (25.4mm x 25.4mm)<br>
-            <strong>Printer:</strong> Zebra Mobile Bluetooth Label Printer<br>
-            <strong>Format:</strong> ZPL (Zebra Programming Language)<br>
-            <strong>Purpose:</strong> Prescription drug inventory labels
-        </div>
-        
-        <div class="controls no-print">
-            <button onclick="window.print()">🖨️ Print to PDF</button>
-            <button onclick="generateMultiple()">📄 Generate 3 Labels (Invoice Qty Example)</button>
-            <button onclick="location.reload()">🔄 Reset</button>
-        </div>
-        
-        <div class="sample-data no-print">
-            <strong>Sample Data:</strong><br>
-            Item: LISINOPRIL 10MG TAB<br>
-            NDC: 68180-0513-01<br>
-            Cost: $12.50<br>
-            Date: 02/08/2026<br>
-            Supplier: McKesson<br>
-            Qty: 3 (will print 3 labels)
-        </div>
-        
-        <div class="label-grid" id="labelGrid">
-            <!-- Label 1 -->
-            <div class="label">
-                <div class="label-number">Label 1/3</div>
-                <div class="label-content">
-                    <div>
-                        <div class="item-name">LISINOPRIL 10MG TAB</div>
-                        <div class="ndc">68180-0513-01</div>
-                    </div>
-                    <div>
-                        <div class="cost">$12.50</div>
-                        <div class="date-row">Rcvd: 02/08/26</div>
-                        <div class="supplier-row">McKesson</div>
-                    </div>
-                    <div class="print-time">Printed: 02/09/26 8:45 AM</div>
-                </div>
-            </div>
-            
-            <!-- Label 2 -->
-            <div class="label">
-                <div class="label-number">Label 2/3</div>
-                <div class="label-content">
-                    <div>
-                        <div class="item-name">LISINOPRIL 10MG TAB</div>
-                        <div class="ndc">68180-0513-01</div>
-                    </div>
-                    <div>
-                        <div class="cost">$12.50</div>
-                        <div class="date-row">Rcvd: 02/08/26</div>
-                        <div class="supplier-row">McKesson</div>
-                    </div>
-                    <div class="print-time">Printed: 02/09/26 8:45 AM</div>
-                </div>
-            </div>
-            
-            <!-- Label 3 -->
-            <div class="label">
-                <div class="label-number">Label 3/3</div>
-                <div class="label-content">
-                    <div>
-                        <div class="item-name">LISINOPRIL 10MG TAB</div>
-                        <div class="ndc">68180-0513-01</div>
-                    </div>
-                    <div>
-                        <div class="cost">$12.50</div>
-                        <div class="date-row">Rcvd: 02/08/26</div>
-                        <div class="supplier-row">McKesson</div>
-                    </div>
-                    <div class="print-time">Printed: 02/09/26 8:45 AM</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="info no-print" style="margin-top: 30px; border-left-color: #FF9800;">
-            <strong>📝 Instructions:</strong><br>
-            1. Click "Print to PDF" button above<br>
-            2. Choose "Save as PDF" in the print dialog<br>
-            3. This will create a PDF you can review/share<br>
-            4. Each label is exactly 1" x 1" when printed<br>
-            5. Labels are generated based on Invoice Quantity (this example shows 3)
-        </div>
-        
-        <div class="sample-data no-print" style="margin-top: 20px;">
-            <strong>More Examples:</strong><br><br>
-            
-            <strong>Example 2: Long Drug Name</strong><br>
-            <div class="label" style="display: inline-block; margin: 10px 0;">
-                <div class="label-content">
-                    <div>
-                        <div class="item-name">ACETAMINOPHEN/HYDROCODONE...</div>
-                        <div class="ndc">00406-0512-01</div>
-                    </div>
-                    <div>
-                        <div class="cost">$45.99</div>
-                        <div class="date-row">Rcvd: 02/09/26</div>
-                        <div class="supplier-row">Cardinal Health</div>
-                    </div>
-                    <div class="print-time">Printed: 02/09/26 9:15 AM</div>
-                </div>
-            </div>
-            
-            <br><br>
-            <strong>Example 3: Different Supplier</strong><br>
-            <div class="label" style="display: inline-block; margin: 10px 0;">
-                <div class="label-content">
-                    <div>
-                        <div class="item-name">METFORMIN 500MG TAB</div>
-                        <div class="ndc">00378-6071-77</div>
-                    </div>
-                    <div>
-                        <div class="cost">$8.25</div>
-                        <div class="date-row">Rcvd: 02/07/26</div>
-                        <div class="supplier-row">AmerisourceBergen</div>
-                    </div>
-                    <div class="print-time">Printed: 02/09/26 10:30 AM</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        function generateMultiple() {
-            const grid = document.getElementById('labelGrid');
-            const count = parseInt(prompt('How many labels to generate?', '3'));
-            
-            if (count && count > 0 && count <= 20) {
-                grid.innerHTML = '';
-                for (let i = 1; i <= count; i++) {
-                    grid.innerHTML += `
-                        <div class="label">
-                            <div class="label-number">Label ${i}/${count}</div>
-                            <div class="label-content">
-                                <div>
-                                    <div class="item-name">LISINOPRIL 10MG TAB</div>
-                                    <div class="ndc">68180-0513-01</div>
-                                </div>
-                                <div>
-                                    <div class="cost">$12.50</div>
-                                    <div class="date-row">Rcvd: 02/08/26</div>
-                                    <div class="supplier-row">McKesson</div>
-                                </div>
-                                <div class="print-time">Printed: ${new Date().toLocaleDateString('en-US', {month: '2-digit', day: '2-digit', year: '2-digit'})} ${new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'})}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
+  <main>
+    <h1>1" × 1" label preview</h1>
+    <p class="lede">
+      These are the same positions the printer gets. The small sticker is actual size.
+      The large one is 3× so you can read it. A real Zebra font is a little narrower than this,
+      which is why long lines end in <code>...</code> before they can run into the barcode.
+    </p>
+    <div class="grid" id="grid"></div>
+  </main>
+  <script src="extension/lib/zpl.js"></script>
+  <script>
+    const samples = [
+      {
+        title: 'Typical scan',
+        note: 'Short name, price, supplier, received date, and lot.',
+        data: {
+          itemName: 'ELIQUIS 5MG NCNR',
+          ndc: '30781577031',
+          upc: '300030894212',
+          cost: '4.52',
+          supplier: 'CARDINAL HEALTH',
+          supplierItemNumber: '019174',
+          dateReceived: '06/01/2026',
+          lot: 'RF6342',
+        },
+      },
+      {
+        title: 'Long drug name',
+        note: 'Two lines. The ending is trimmed instead of printing over the price.',
+        data: {
+          itemName: 'ACETAMINOPHEN/HYDROCODONE BITARTRATE 325MG-10MG TABLET',
+          ndc: '00406051201',
+          upc: '304060512015',
+          cost: '45.99',
+          supplier: 'MCKESSON CORPORATION',
+          supplierItemNumber: '123456789',
+          dateReceived: '09/26/2026',
+          lot: 'LOT-ABCDEFGH123',
+        },
+      },
+      {
+        title: 'No lot number',
+        note: 'Received date stays readable when lot is missing.',
+        data: {
+          itemName: 'LISINOPRIL 10MG TAB',
+          ndc: '68180051301',
+          cost: '12.50',
+          supplier: 'AMERISOURCEBERGEN',
+          supplierItemNumber: '88421',
+          dateReceived: '02/08/2026',
+        },
+      },
+      {
+        title: 'Long supplier and lot',
+        note: 'Supplier and lot trim at the edge. They do not cover the barcode.',
+        data: {
+          itemName: 'INSULIN GLARGINE SOLOSTAR 100 UNIT/ML PEN 3ML',
+          ndc: '00088221905',
+          cost: '89.00',
+          supplier: 'CARDINAL HEALTH PHARMACEUTICAL DISTRIBUTION',
+          supplierItemNumber: '9988776655',
+          dateReceived: '09/01/2026',
+          lot: 'VERYLONGLOTNUMBER99',
+        },
+      },
+    ];
+
+    function overlaps(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function renderLabel(layout, className) {
+      const label = document.createElement('div');
+      label.className = `label ${className}`;
+      const scale = className === 'large' ? 3 : 1;
+      const dot = (n) => `${(n / layout.printWidth) * scale}in`;
+
+      for (const field of layout.fields) {
+        const el = document.createElement('div');
+        el.className = `field${field.role === 'price' ? ' price' : ''}`;
+        el.textContent = field.text;
+        el.style.left = dot(field.x);
+        el.style.top = dot(field.y);
+        el.style.width = dot(field.w);
+        el.style.height = dot(field.h);
+        el.style.fontSize = dot(field.fontH);
+        label.appendChild(el);
+      }
+
+      if (layout.dm) {
+        const dm = document.createElement('div');
+        dm.className = 'dm';
+        dm.style.left = dot(layout.dm.x);
+        dm.style.top = dot(layout.dm.y);
+        dm.style.width = dot(layout.dm.w);
+        dm.style.height = dot(layout.dm.h);
+        label.appendChild(dm);
+      }
+
+      return label;
+    }
+
+    const grid = document.getElementById('grid');
+    for (const sample of samples) {
+      const layout = layoutLabel(sample.data);
+      const boxes = [...layout.fields];
+      if (layout.dm) boxes.push(layout.dm);
+      const hits = [];
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          if (overlaps(boxes[i], boxes[j])) hits.push(`${boxes[i].role} and ${boxes[j].role}`);
         }
-    </script>
+      }
+
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.innerHTML = `<h2></h2><p></p>`;
+      card.querySelector('h2').textContent = sample.title;
+      card.querySelector('p').textContent = sample.note;
+
+      const stage = document.createElement('div');
+      stage.className = 'stage';
+      stage.appendChild(renderLabel(layout, 'actual'));
+      stage.appendChild(renderLabel(layout, 'large'));
+      card.appendChild(stage);
+
+      const caption = document.createElement('div');
+      caption.className = 'caption';
+      const name = layout.fields.find((field) => field.role === 'name');
+      caption.textContent = name && name.text !== sample.data.itemName
+        ? `Name on label: ${name.text}`
+        : 'Name fits without trimming.';
+      card.appendChild(caption);
+
+      if (hits.length) {
+        const warn = document.createElement('div');
+        warn.className = 'warn';
+        warn.textContent = `Overlap: ${hits.join(', ')}`;
+        card.appendChild(warn);
+      }
+
+      const zpl = generateLabel(sample.data);
+      const details = document.createElement('details');
+      details.className = 'zpl';
+      details.open = sample.title === 'Typical scan';
+      const summary = document.createElement('summary');
+      summary.textContent = 'ZPL sent to the printer';
+      const pre = document.createElement('pre');
+      pre.textContent = zpl;
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.textContent = 'Copy ZPL';
+      copy.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(zpl);
+        copy.textContent = 'Copied';
+        setTimeout(() => { copy.textContent = 'Copy ZPL'; }, 1500);
+      });
+      details.append(summary, pre, copy);
+      card.appendChild(details);
+
+      grid.appendChild(card);
+    }
+  </script>
 </body>
 </html>

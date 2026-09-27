@@ -62,8 +62,11 @@ async function getSettings() {
   };
 }
 
-async function lookupBarcode(apiUrl, code, hours = DEFAULT_HOURS) {
-  const url = `${apiUrl.replace(/\/$/, '')}/api/items/barcode/${encodeURIComponent(code)}/recent?hours=${hours}`;
+async function lookupBarcode(apiUrl, code, hours = DEFAULT_HOURS, candidates = []) {
+  const params = new URLSearchParams({ hours: String(hours) });
+  const extra = candidates.filter(Boolean);
+  if (extra.length) params.set('candidates', extra.join(','));
+  const url = `${apiUrl.replace(/\/$/, '')}/api/items/barcode/${encodeURIComponent(code)}/recent?${params}`;
 
   const response = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -75,6 +78,7 @@ async function lookupBarcode(apiUrl, code, hours = DEFAULT_HOURS) {
     const error = new Error(data.error || data.message || `Lookup failed (${response.status})`);
     error.status = response.status;
     error.data = data;
+    error.searchedAll = data.searchedAllCandidates === true;
     throw error;
   }
 
@@ -82,20 +86,43 @@ async function lookupBarcode(apiUrl, code, hours = DEFAULT_HOURS) {
 }
 
 async function lookupWithCandidates(codes, settings) {
+  const expanded = expandLookupCodes(codes);
   const tried = [];
   let lastError = null;
+  let completedFallback = null;
 
-  for (const code of expandLookupCodes(codes)) {
+  const [primary, ...rest] = expanded;
+  if (primary) {
+    tried.push(primary);
+    try {
+      const result = await lookupBarcode(settings.apiUrl, primary, settings.hours, rest);
+      const packed = { result, matchedCode: result.matchedCode || primary, tried: expanded };
+      // Current API searches every candidate before deciding the line is done.
+      if (result.searchedAllCandidates || !result.completed) return packed;
+      completedFallback = packed;
+    } catch (err) {
+      lastError = err;
+      if (err.searchedAll) throw Object.assign(err, { tried: expanded });
+    }
+  }
+
+  // Older API builds stop at the first code that hits, even when that invoice
+  // is already labeled and another invoice still has the same drug open.
+  for (const code of rest) {
     if (!code || tried.includes(code)) continue;
     tried.push(code);
 
     try {
       const result = await lookupBarcode(settings.apiUrl, code, settings.hours);
-      return { result, matchedCode: code, tried };
+      const packed = { result, matchedCode: result.matchedCode || code, tried };
+      if (!result.completed) return packed;
+      if (!completedFallback) completedFallback = packed;
     } catch (err) {
       lastError = err;
     }
   }
+
+  if (completedFallback) return completedFallback;
 
   const notFound = new Error(lastError?.message || 'Item not found on recent invoices');
   notFound.status = lastError?.status || 404;

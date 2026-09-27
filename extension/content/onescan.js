@@ -213,7 +213,7 @@ async function maybePrintLabels(result, parsedHint, scanSource) {
     // labelCount again. A failure here doesn't affect the print that already
     // succeeded -- it only means the next scan might print again too.
     chrome.runtime.sendMessage({ type: 'MARK_COMPLETED', result }).catch((err) => {
-      BP_RX.warn('Mark completed failed (non-blocking)', err?.message || err);
+      BP_RX.alert('Mark completed failed (non-blocking)', err?.message || err);
     });
 
     return { printMs: Date.now() - printStart, labelCount };
@@ -822,7 +822,7 @@ function boot() {
       return false;
     });
   } catch (err) {
-    BP_RX.warn('Boot failed', err.message);
+    BP_RX.alert('Boot failed', err.message);
   }
 }
 

@@ -20,12 +20,16 @@ const BP_RX = {
 
   warn(...args) {
     console.warn(this.LOG_PREFIX, ...args);
+  },
+
+  alert(...args) {
+    console.error(this.LOG_PREFIX, ...args);
     this.reportIssue(args);
   },
 
   // Fire-and-forget relay to the background worker, which forwards to Better
   // Stack if configured. Content scripts can't reach Better Stack directly
-  // without their own host permission, so everything routes through here.
+  // without their own host permission, so serious failures route through here.
   reportIssue(args) {
     if (!this.hasRuntime()) return;
     const [message, ...rest] = args;
@@ -33,7 +37,7 @@ const BP_RX = {
       chrome.runtime
         .sendMessage({
           type: 'REMOTE_LOG',
-          level: 'WARN',
+          level: 'ERROR',
           message: String(message ?? ''),
           context: rest.length ? { details: rest } : undefined,
         })
