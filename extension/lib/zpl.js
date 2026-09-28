@@ -95,10 +95,9 @@
    * 1" x 1" (203 x 203 dots).
    *
    * Drug name gets up to three full-width lines at the largest size that
-   * still fits the whole name. The block sits as low as it can without
-   * crossing the barcode, so short names use the gap that used to sit empty
-   * above the date. A three-line name already fills that space, so it stays
-   * near the top. The Data Matrix is module 3.
+   * still fits the whole name. It starts low enough to clear the top edge,
+   * and leftover room goes to the price. A three-line name already fills the
+   * square, so its price stays smaller. The Data Matrix is module 3.
    */
   function layoutLabel(data) {
     const printWidth = data.printWidth || DEFAULT_PRINT_WIDTH;
@@ -118,11 +117,9 @@
     const fields = [];
     const rawName = String(data.itemName || '').trim() || 'ITEM';
     const nameLayout = fitWrappedText(rawName, contentWidth, [20, 18, 17], 3);
-    // Keep the name off the top edge. 12pt is the goal; long names give some
-    // of it back so the price and supplier still fit. Any space left above
-    // the barcode is added on top of that, because that gap was sitting empty
-    // at the bottom of the sticker.
-    const topGoal = margin + Math.round((12 * printWidth) / 72);
+    // Clear the top edge, but leave the spare dots for the price instead of
+    // pushing the name all the way down to the barcode.
+    const topGoal = margin + Math.round((10 * printWidth) / 72);
     const nameHeight = nameLayout.font * nameLayout.lines + (nameLayout.lines - 1);
     const codeFont = 17;
     const ndcFormatted = formatNdc(data.ndc);
@@ -142,7 +139,8 @@
     if (data.lot) footLines.push({ role: 'lot', text: `Lot ${String(data.lot).trim()}` });
 
     const price = formatPrice(data.cost);
-    const preferredPrice = price.length >= 8 ? 24 : 28;
+    const preferredPrice = price.length >= 8 ? 32 : 40;
+    const maxPrice = price.length >= 8 ? 34 : 40;
     const blocks = [{ role: 'name', h: nameHeight, font: nameLayout.font, text: nameLayout.text, lines: nameLayout.lines }];
     if (codeLine) {
       blocks.push({
@@ -169,20 +167,21 @@
     let top = topGoal;
     const priceBlock = blocks.find((block) => block.role === 'price');
     const blockHeight = () => blocks.reduce((sum, block) => sum + block.h, 0) + gap * (blocks.length - 1);
-    while (top + blockHeight() > limit && priceBlock.h > 16) {
+    while (top + blockHeight() > limit && priceBlock.h > 22) {
       priceBlock.h -= 1;
       priceBlock.font -= 1;
     }
     while (top + blockHeight() > limit && top > topFloor) top -= 1;
-    while (top + blockHeight() > limit && priceBlock.h > 14) {
+    while (top + blockHeight() > limit && priceBlock.h > 16) {
       priceBlock.h -= 1;
       priceBlock.font -= 1;
     }
     while (top + blockHeight() > limit && top > margin) top -= 1;
-    const fittedHeight = blockHeight();
-
-    const slack = Math.max(0, limit - (top + fittedHeight));
-    let y = top + slack;
+    const slack = Math.max(0, limit - (top + blockHeight()));
+    const priceGrow = Math.min(slack, maxPrice - priceBlock.h);
+    priceBlock.h += priceGrow;
+    priceBlock.font += priceGrow;
+    let y = top;
     for (const block of blocks) {
       fields.push({
         role: block.role,

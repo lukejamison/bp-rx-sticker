@@ -6,26 +6,43 @@ namespace BpRx.BridgeMonitor.Forms;
 public sealed class StatusForm : Form
 {
     private readonly MonitorCoordinator _coordinator;
-    private readonly Label _summaryLabel = new() { AutoSize = false, Height = 40, Dock = DockStyle.Top };
-    private readonly Label _bridgeLabel = new() { AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 8, 0, 0) };
-    private readonly Label _printerLabel = new() { AutoSize = true, Dock = DockStyle.Top };
-    private readonly Label _adminLabel = new() { AutoSize = true, Dock = DockStyle.Top, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold) };
-    private readonly Label _taskLabel = new() { AutoSize = true, Dock = DockStyle.Top };
-    private readonly Label _checkedLabel = new() { AutoSize = true, Dock = DockStyle.Top, ForeColor = Color.Gray };
-    private readonly Label _actionLabel = new() { AutoSize = false, Height = 36, Dock = DockStyle.Bottom, ForeColor = Color.DarkGreen };
-    private readonly TextBox _logDirBox = new() { Dock = DockStyle.Top };
-    private readonly TextBox _configPathBox = new() { Dock = DockStyle.Top };
-    private readonly TextBox _webhookBox = new() { Dock = DockStyle.Top };
+    private readonly List<Label> _wrappingLabels = [];
+    private readonly TableLayoutPanel _layout;
+    private readonly Label _summaryLabel;
+    private readonly Label _bridgeLabel;
+    private readonly Label _printerLabel;
+    private readonly Label _adminLabel;
+    private readonly Label _taskLabel;
+    private readonly Label _checkedLabel;
+    private readonly Label _actionLabel;
+    private readonly TextBox _logDirBox = new();
+    private readonly TextBox _configPathBox = new();
+    private readonly TextBox _webhookBox = new();
 
     public StatusForm(MonitorCoordinator coordinator, HealthSnapshot? initialHealth)
     {
         _coordinator = coordinator;
+        _summaryLabel = WrappingLabel();
+        _bridgeLabel = WrappingLabel();
+        _printerLabel = WrappingLabel();
+        _adminLabel = WrappingLabel(new Font(SystemFonts.DefaultFont, FontStyle.Bold));
+        _taskLabel = WrappingLabel();
+        _checkedLabel = WrappingLabel(color: Color.Gray);
+        _actionLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Bottom,
+            ForeColor = Color.DarkGreen,
+            Padding = new Padding(16, 6, 16, 6),
+        };
+
         Text = "BP RX Bridge Monitor";
-        Width = 540;
-        Height = 520;
+        Width = 680;
+        Height = 720;
+        MinimumSize = new Size(460, 420);
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         MinimizeBox = true;
         ShowInTaskbar = true;
         var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -36,34 +53,35 @@ public sealed class StatusForm : Form
         _configPathBox.Text = settings.BridgeConfigPath;
         _webhookBox.Text = settings.LogWebhookUrl;
 
-        var layout = new TableLayoutPanel
+        _layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             AutoScroll = true,
             Padding = new Padding(16),
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        layout.Controls.Add(MakeSection("Status"));
-        layout.Controls.Add(_adminLabel);
-        layout.Controls.Add(_summaryLabel);
-        layout.Controls.Add(_bridgeLabel);
-        layout.Controls.Add(_printerLabel);
-        layout.Controls.Add(_taskLabel);
-        layout.Controls.Add(_checkedLabel);
-        layout.Controls.Add(MakeSection("Paths (save after editing)"));
-        layout.Controls.Add(MakeField("Bridge log folder", _logDirBox));
-        layout.Controls.Add(MakeField("Bridge config.local.env", _configPathBox));
-        layout.Controls.Add(MakeField("Log webhook URL", _webhookBox));
+        AddRow(MakeSection("Status"));
+        AddRow(_adminLabel);
+        AddRow(_summaryLabel);
+        AddRow(_bridgeLabel);
+        AddRow(_printerLabel);
+        AddRow(_taskLabel);
+        AddRow(_checkedLabel);
+        AddRow(MakeSection("Paths (save after editing)"));
+        AddRow(MakeField("Bridge log folder", _logDirBox));
+        AddRow(MakeField("Bridge config.local.env", _configPathBox));
+        AddRow(MakeField("Log webhook URL", _webhookBox));
 
         var buttonRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 80,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true,
-            Padding = new Padding(16, 0, 16, 12),
+            Padding = new Padding(16, 8, 16, 12),
         };
 
         buttonRow.Controls.Add(MakeButton("Refresh", async (_, _) =>
@@ -98,12 +116,51 @@ public sealed class StatusForm : Form
 
         // Dock the bottom bars first (last added is docked first) so the
         // status layout cannot cover the buttons and hide the window contents.
-        Controls.Add(layout);
+        Controls.Add(_layout);
         Controls.Add(_actionLabel);
         Controls.Add(buttonRow);
 
+        Load += (_, _) => UpdateWrapWidths();
+        Resize += (_, _) => UpdateWrapWidths();
+
         if (initialHealth is not null) UpdateHealth(initialHealth);
         else _summaryLabel.Text = "Checking…";
+    }
+
+    private void AddRow(Control control)
+    {
+        var row = _layout.RowCount++;
+        _layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        control.Dock = DockStyle.Fill;
+        _layout.Controls.Add(control, 0, row);
+    }
+
+    private Label WrappingLabel(Font? font = null, Color? color = null)
+    {
+        var label = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 0, 4),
+        };
+        if (font is not null) label.Font = font;
+        if (color is not null) label.ForeColor = color.Value;
+        _wrappingLabels.Add(label);
+        return label;
+    }
+
+    private void UpdateWrapWidths()
+    {
+        var contentWidth = Math.Max(180, _layout.ClientSize.Width - _layout.Padding.Horizontal);
+        foreach (var label in _wrappingLabels)
+        {
+            if (label.MaximumSize.Width != contentWidth)
+                label.MaximumSize = new Size(contentWidth, 0);
+        }
+
+        var actionWidth = Math.Max(180, ClientSize.Width - 32);
+        if (_actionLabel.MaximumSize.Width != actionWidth)
+            _actionLabel.MaximumSize = new Size(actionWidth, 0);
     }
 
     private HealthSnapshot? _lastHealth;
@@ -169,10 +226,20 @@ public sealed class StatusForm : Form
 
     private static Control MakeField(string label, Control input)
     {
-        var panel = new Panel { Height = 56, Dock = DockStyle.Top };
-        panel.Controls.Add(new Label { Text = label, Dock = DockStyle.Top, Height = 18 });
-        input.Dock = DockStyle.Top;
-        panel.Controls.Add(input);
+        var panel = new TableLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        panel.Controls.Add(new Label { Text = label, AutoSize = true, Dock = DockStyle.Fill }, 0, 0);
+        input.Dock = DockStyle.Fill;
+        input.Margin = new Padding(0, 2, 0, 0);
+        panel.Controls.Add(input, 0, 1);
         return panel;
     }
 
