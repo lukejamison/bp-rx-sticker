@@ -94,10 +94,10 @@
   /**
    * 1" x 1" (203 x 203 dots).
    *
-   * Drug name gets up to three full-width lines at the largest size that
-   * still fits the whole name. It starts low enough to clear the top edge,
-   * and leftover room goes to the price. A three-line name already fills the
-   * square, so its price stays smaller. The Data Matrix is module 3.
+   * Drug name gets up to three lines at full size. Anything past that is
+   * cut with an ellipsis instead of shrinking the type. The price stays large.
+   * Supplier, item number, received date, and lot sit beside the barcode
+   * so a long name cannot shrink the cost. The Data Matrix is module 3.
    */
   function layoutLabel(data) {
     const printWidth = data.printWidth || DEFAULT_PRINT_WIDTH;
@@ -116,7 +116,7 @@
 
     const fields = [];
     const rawName = String(data.itemName || '').trim() || 'ITEM';
-    const nameLayout = fitWrappedText(rawName, contentWidth, [20, 18, 17], 3);
+    const nameLayout = fitWrappedText(rawName, contentWidth, [20], 3);
     // Clear the top edge, but leave the spare dots for the price instead of
     // pushing the name all the way down to the barcode.
     const topGoal = margin + Math.round((10 * printWidth) / 72);
@@ -124,23 +124,17 @@
     const codeFont = 17;
     const ndcFormatted = formatNdc(data.ndc);
     const codeLine = ndcFormatted ? `NDC ${ndcFormatted}` : formatUpcLine(data.upc);
-    const supplierFont = 17;
-    const itemFont = 16;
-    const metaFont = 16;
     const supplierRaw = String(data.supplier || '').trim();
     const itemRaw = String(data.supplierItemNumber || '').trim();
-    const detailRows = [];
-    if (supplierRaw) detailRows.push({ role: 'supplier', font: supplierFont, text: supplierRaw });
-    if (itemRaw) detailRows.push({ role: 'supplierItem', font: itemFont, text: itemRaw });
-
     const received = formatDateShort(data.dateReceived);
-    const footLines = [];
-    if (received) footLines.push({ role: 'received', text: `Rcvd ${received}` });
-    if (data.lot) footLines.push({ role: 'lot', text: `Lot ${String(data.lot).trim()}` });
+    const sideRows = [];
+    if (supplierRaw) sideRows.push({ role: 'supplier', text: supplierRaw });
+    if (itemRaw) sideRows.push({ role: 'supplierItem', text: itemRaw });
+    if (received) sideRows.push({ role: 'received', text: `Rcvd ${received}` });
+    if (data.lot) sideRows.push({ role: 'lot', text: `Lot ${String(data.lot).trim()}` });
 
     const price = formatPrice(data.cost);
-    const preferredPrice = price.length >= 8 ? 32 : 40;
-    const maxPrice = price.length >= 8 ? 34 : 40;
+    const preferredPrice = price.length >= 8 ? 34 : 40;
     const blocks = [{ role: 'name', h: nameHeight, font: nameLayout.font, text: nameLayout.text, lines: nameLayout.lines }];
     if (codeLine) {
       blocks.push({
@@ -152,35 +146,16 @@
       });
     }
     blocks.push({ role: 'price', h: preferredPrice, font: preferredPrice, text: price, lines: 1 });
-    for (const row of detailRows) {
-      blocks.push({
-        role: row.role,
-        h: row.font,
-        font: row.font,
-        text: abbrevText(row.text, maxCharsForWidth(contentWidth, row.font)),
-        lines: 1,
-      });
-    }
 
     const limit = bandTop - gap;
-    const topFloor = margin + Math.round((5 * printWidth) / 72);
     let top = topGoal;
     const priceBlock = blocks.find((block) => block.role === 'price');
     const blockHeight = () => blocks.reduce((sum, block) => sum + block.h, 0) + gap * (blocks.length - 1);
-    while (top + blockHeight() > limit && priceBlock.h > 22) {
-      priceBlock.h -= 1;
-      priceBlock.font -= 1;
-    }
-    while (top + blockHeight() > limit && top > topFloor) top -= 1;
-    while (top + blockHeight() > limit && priceBlock.h > 16) {
-      priceBlock.h -= 1;
-      priceBlock.font -= 1;
-    }
     while (top + blockHeight() > limit && top > margin) top -= 1;
-    const slack = Math.max(0, limit - (top + blockHeight()));
-    const priceGrow = Math.min(slack, maxPrice - priceBlock.h);
-    priceBlock.h += priceGrow;
-    priceBlock.font += priceGrow;
+    while (top + blockHeight() > limit && priceBlock.h > 32) {
+      priceBlock.h -= 1;
+      priceBlock.font -= 1;
+    }
     let y = top;
     for (const block of blocks) {
       fields.push({
@@ -197,39 +172,42 @@
       y += block.h + gap;
     }
 
-    if (ndcDigits && footLines.length) {
-      let footY = labelLength - margin;
-      for (let i = footLines.length - 1; i >= 0; i--) {
-        footY -= metaFont;
-        if (footY < bandTop) break;
+    const sideBand = ndcDigits ? Math.max(0, labelLength - margin - bandTop) : labelLength - margin - y;
+    const sideLayout = layoutSideColumn(sideRows, ndcDigits ? sideWidth : contentWidth, sideBand);
+    if (ndcDigits) {
+      let sideY = labelLength - margin;
+      for (let i = sideLayout.rows.length - 1; i >= 0; i--) {
+        const row = sideLayout.rows[i];
+        sideY -= row.h;
+        if (sideY < bandTop) break;
         fields.push({
-          role: footLines[i].role,
+          role: row.role,
           x: margin,
-          y: footY,
+          y: sideY,
           w: sideWidth,
-          h: metaFont,
-          fontH: metaFont,
-          fontW: metaFont,
+          h: row.h,
+          fontH: row.font,
+          fontW: row.font,
           lines: 1,
-          text: abbrevText(footLines[i].text, maxCharsForWidth(sideWidth, metaFont)),
+          text: row.text,
         });
-        footY -= 1;
+        if (i > 0) sideY -= sideLayout.rowGap;
       }
     } else {
-      for (const line of footLines) {
-        if (y + metaFont > labelLength - margin) break;
+      for (const row of sideLayout.rows) {
+        if (y + row.h > labelLength - margin) break;
         fields.push({
-          role: line.role,
+          role: row.role,
           x: margin,
           y,
           w: contentWidth,
-          h: metaFont,
-          fontH: metaFont,
-          fontW: metaFont,
+          h: row.h,
+          fontH: row.font,
+          fontW: row.font,
           lines: 1,
-          text: abbrevText(line.text, maxCharsForWidth(contentWidth, metaFont)),
+          text: row.text,
         });
-        y += metaFont + 1;
+        y += row.h + 1;
       }
     }
 
@@ -238,6 +216,30 @@
       : null;
 
     return { printWidth, labelLength, fields, dm };
+  }
+
+  function layoutSideColumn(rows, width, maxHeight) {
+    if (!rows.length || maxHeight < 11) return { rows: [], rowGap: 0 };
+    let chosenFont = 11;
+    let rowGap = 0;
+    for (let font = 16; font >= 11; font--) {
+      const gap = font >= 14 ? 1 : 0;
+      const height = rows.length * font + Math.max(0, rows.length - 1) * gap;
+      if (height <= maxHeight) {
+        chosenFont = font;
+        rowGap = gap;
+        break;
+      }
+    }
+    return {
+      rowGap,
+      rows: rows.map((row) => ({
+        role: row.role,
+        font: chosenFont,
+        h: chosenFont,
+        text: abbrevText(row.text, maxCharsForWidth(width, chosenFont)),
+      })),
+    };
   }
 
   function fitWrappedText(text, width, fontSizes, maxLines) {
