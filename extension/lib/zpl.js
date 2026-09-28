@@ -94,54 +94,48 @@
   /**
    * 1" x 1" (203 x 203 dots).
    *
-   * The Data Matrix sits in the bottom-right. Everything above it uses the
-   * full label width, so the drug name is not squeezed down to ~20 characters.
-   * Received/lot (and supplier, if the name is very tall) stay in the column
-   * to the left of the barcode. Positions are computed once and reused by the
-   * HTML preview so what you see is what the printer is asked to draw.
+   * Drug name gets up to three full-width lines at the largest size that
+   * still fits the whole name. NDC, supplier, item number, and received date
+   * sit under it. The price uses whatever height is left above the barcode.
+   * The Data Matrix is module 3 so those lines have room to be readable.
    */
   function layoutLabel(data) {
     const printWidth = data.printWidth || DEFAULT_PRINT_WIDTH;
     const labelLength = data.labelLength || DEFAULT_LABEL_LENGTH;
-    const margin = 4;
+    const margin = 2;
+    const gap = 2;
     const contentWidth = printWidth - margin * 2;
 
     const ndcDigits = ndcBarcodeDigits(data.ndc);
-    const dmModule = 4;
-    const dmSize = ndcDigits ? dmModule * 16 : 0;
+    const dmModule = ndcDigits ? 3 : 0;
+    const dmSize = dmModule * 16;
     const dmX = ndcDigits ? printWidth - dmSize - margin : 0;
     const dmY = ndcDigits ? labelLength - dmSize - margin : 0;
-    const dmGap = 4;
     const bandTop = ndcDigits ? dmY : labelLength - margin;
-    const sideWidth = ndcDigits ? Math.max(60, dmX - margin - dmGap) : contentWidth;
+    const sideWidth = ndcDigits ? Math.max(80, dmX - margin - 4) : contentWidth;
 
     const fields = [];
-
-    const rawName = String(data.itemName || '').trim();
-    const wideChars = maxCharsForWidth(contentWidth, 16);
-    const nameFont = rawName.length > wideChars ? 14 : 16;
-    const nameChars = maxCharsForWidth(contentWidth, nameFont);
-    const nameLines = rawName.length > nameChars ? 2 : 1;
-    const name = abbrevText(rawName, nameLines * nameChars) || 'ITEM';
-    const nameHeight = nameFont * nameLines + (nameLines > 1 ? 1 : 0);
+    const rawName = String(data.itemName || '').trim() || 'ITEM';
+    const nameLayout = fitWrappedText(rawName, contentWidth, [20, 18, 17], 3);
     let y = margin;
+    const nameHeight = nameLayout.font * nameLayout.lines + (nameLayout.lines - 1);
     fields.push({
       role: 'name',
       x: margin,
       y,
       w: contentWidth,
       h: nameHeight,
-      fontH: nameFont,
-      fontW: nameFont,
-      lines: nameLines,
-      text: name,
+      fontH: nameLayout.font,
+      fontW: nameLayout.font,
+      lines: nameLayout.lines,
+      text: nameLayout.text,
     });
-    y += nameHeight + 3;
+    y += nameHeight + gap;
 
-    const codeFont = 13;
+    const codeFont = 17;
     const ndcFormatted = formatNdc(data.ndc);
     const codeLine = ndcFormatted ? `NDC ${ndcFormatted}` : formatUpcLine(data.upc);
-    if (codeLine && y + codeFont <= bandTop - 2) {
+    if (codeLine && y + codeFont <= bandTop) {
       fields.push({
         role: 'code',
         x: margin,
@@ -153,61 +147,29 @@
         lines: 1,
         text: abbrevText(codeLine, maxCharsForWidth(contentWidth, codeFont)),
       });
-      y += codeFont + 2;
+      y += codeFont + gap;
     }
 
-    const metaFont = 13;
-    const metaLines = [];
-    const received = formatDateShort(data.dateReceived);
-    if (received) metaLines.push({ role: 'received', text: `Rcvd ${received}` });
-    if (data.lot) metaLines.push({ role: 'lot', text: `Lot ${String(data.lot).trim()}` });
-
-    const metaBlock = metaLines.length * (metaFont + 1);
-
-    function sideMetaFields() {
-      const placed = [];
-      let metaBottom = labelLength - margin;
-      for (let i = metaLines.length - 1; i >= 0; i--) {
-        metaBottom -= metaFont;
-        placed.push({
-          role: metaLines[i].role,
-          x: margin,
-          y: metaBottom,
-          w: sideWidth,
-          h: metaFont,
-          fontH: metaFont,
-          fontW: metaFont,
-          lines: 1,
-          text: abbrevText(metaLines[i].text, maxCharsForWidth(sideWidth, metaFont)),
-        });
-        metaBottom -= 1;
-      }
-      return placed;
-    }
-
-    const supplierFont = 14;
-    const itemFont = 12;
+    const supplierFont = 17;
+    const itemFont = 16;
+    const metaFont = 16;
     const supplierRaw = String(data.supplier || '').trim();
     const itemRaw = String(data.supplierItemNumber || '').trim();
-    const supplierRows = [];
-    if (supplierRaw) supplierRows.push({ role: 'supplier', font: supplierFont, text: supplierRaw });
-    if (itemRaw) supplierRows.push({ role: 'supplierItem', font: itemFont, text: itemRaw });
-    const supplierHeight = supplierRows.reduce((sum, row) => sum + row.font + 2, 0);
+    const detailRows = [];
+    if (supplierRaw) detailRows.push({ role: 'supplier', font: supplierFont, text: supplierRaw });
+    if (itemRaw) detailRows.push({ role: 'supplierItem', font: itemFont, text: itemRaw });
 
+    const received = formatDateShort(data.dateReceived);
+    const footLines = [];
+    if (received) footLines.push({ role: 'received', text: `Rcvd ${received}` });
+    if (data.lot) footLines.push({ role: 'lot', text: `Lot ${String(data.lot).trim()}` });
+
+    const detailHeight = detailRows.reduce((sum, row) => sum + row.font + gap, 0);
     const priceTop = y;
+    const priceRoom = bandTop - priceTop - detailHeight - gap;
     const price = formatPrice(data.cost);
-    const desiredPrice = price.length >= 8 ? 26 : 32;
-    let keepMetaAbove = metaLines.length > 0;
-    let priceRoom = bandTop - priceTop - supplierHeight - (keepMetaAbove ? metaBlock : 0) - 2;
-    let priceFont = Math.min(desiredPrice, priceRoom);
-    if (priceFont < 22 && keepMetaAbove) {
-      keepMetaAbove = false;
-      priceRoom = bandTop - priceTop - supplierHeight - 2;
-      priceFont = Math.min(desiredPrice, priceRoom);
-    }
-    const priceFits = priceFont >= 20;
-
-    if (priceFits) {
+    const priceFont = Math.max(24, Math.min(price.length >= 8 ? 32 : 40, priceRoom));
+    if (priceRoom >= 24) {
       fields.push({
         role: 'price',
         x: margin,
@@ -219,68 +181,46 @@
         lines: 1,
         text: price,
       });
-      y = priceTop + priceFont + 3;
+      y = priceTop + priceFont + gap;
     }
 
-    const supplierFitsAbove = supplierRows.length > 0 && y + supplierHeight <= bandTop;
-    if (supplierFitsAbove) {
-      for (const row of supplierRows) {
+    for (const row of detailRows) {
+      if (y + row.font > bandTop) break;
+      fields.push({
+        role: row.role,
+        x: margin,
+        y,
+        w: contentWidth,
+        h: row.font,
+        fontH: row.font,
+        fontW: row.font,
+        lines: 1,
+        text: abbrevText(row.text, maxCharsForWidth(contentWidth, row.font)),
+      });
+      y += row.font + gap;
+    }
+
+    if (ndcDigits && footLines.length) {
+      let footY = labelLength - margin;
+      for (let i = footLines.length - 1; i >= 0; i--) {
+        footY -= metaFont;
+        if (footY < bandTop) break;
         fields.push({
-          role: row.role,
+          role: footLines[i].role,
           x: margin,
-          y,
-          w: contentWidth,
-          h: row.font,
-          fontH: row.font,
-          fontW: row.font,
-          lines: 1,
-          text: abbrevText(row.text, maxCharsForWidth(contentWidth, row.font)),
-        });
-        y += row.font + 2;
-      }
-    } else if (supplierRows.length && ndcDigits) {
-      const sideMeta = sideMetaFields();
-      const metaTop = sideMeta.length
-        ? Math.min(...sideMeta.map((field) => field.y))
-        : labelLength - margin;
-      let sideY = metaTop - 2;
-      for (let i = supplierRows.length - 1; i >= 0; i--) {
-        sideY -= supplierRows[i].font;
-        if (sideY < bandTop) break;
-        fields.push({
-          role: supplierRows[i].role,
-          x: margin,
-          y: sideY,
+          y: footY,
           w: sideWidth,
-          h: supplierRows[i].font,
-          fontH: supplierRows[i].font,
-          fontW: supplierRows[i].font,
+          h: metaFont,
+          fontH: metaFont,
+          fontW: metaFont,
           lines: 1,
-          text: abbrevText(supplierRows[i].text, maxCharsForWidth(sideWidth, supplierRows[i].font)),
+          text: abbrevText(footLines[i].text, maxCharsForWidth(sideWidth, metaFont)),
         });
-        sideY -= 1;
+        footY -= 1;
       }
-    } else if (supplierRows.length) {
-      for (const row of supplierRows) {
-        if (y + row.font > labelLength - margin) break;
-        fields.push({
-          role: row.role,
-          x: margin,
-          y,
-          w: contentWidth,
-          h: row.font,
-          fontH: row.font,
-          fontW: row.font,
-          lines: 1,
-          text: abbrevText(row.text, maxCharsForWidth(contentWidth, row.font)),
-        });
-        y += row.font + 2;
-      }
-    }
-
-    if (keepMetaAbove) {
-      for (const line of metaLines) {
-        if (y + metaFont > bandTop) break;
+    } else {
+      for (const line of footLines) {
+        if (y + metaFont > labelLength - margin) break;
         fields.push({
           role: line.role,
           x: margin,
@@ -294,25 +234,6 @@
         });
         y += metaFont + 1;
       }
-    } else if (ndcDigits) {
-      fields.push(...sideMetaFields());
-    } else if (metaLines.length) {
-      let metaY = labelLength - margin - metaFont;
-      for (let i = metaLines.length - 1; i >= 0; i--) {
-        if (metaY < y) break;
-        fields.push({
-          role: metaLines[i].role,
-          x: margin,
-          y: metaY,
-          w: contentWidth,
-          h: metaFont,
-          fontH: metaFont,
-          fontW: metaFont,
-          lines: 1,
-          text: abbrevText(metaLines[i].text, maxCharsForWidth(contentWidth, metaFont)),
-        });
-        metaY -= metaFont + 1;
-      }
     }
 
     const dm = ndcDigits
@@ -320,6 +241,20 @@
       : null;
 
     return { printWidth, labelLength, fields, dm };
+  }
+
+  function fitWrappedText(text, width, fontSizes, maxLines) {
+    for (const font of fontSizes) {
+      const perLine = maxCharsForWidth(width, font);
+      const capacity = perLine * maxLines;
+      if (text.length <= capacity) {
+        const lines = Math.max(1, Math.ceil(text.length / perLine));
+        return { font, lines, text };
+      }
+    }
+    const font = fontSizes[fontSizes.length - 1];
+    const lines = maxLines;
+    return { font, lines, text: abbrevText(text, maxCharsForWidth(width, font) * lines) };
   }
 
   function generateLabel(data) {

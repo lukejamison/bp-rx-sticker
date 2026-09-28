@@ -40,9 +40,10 @@ public sealed class StatusForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 12,
+            AutoScroll = true,
             Padding = new Padding(16),
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         layout.Controls.Add(MakeSection("Status"));
         layout.Controls.Add(_adminLabel);
@@ -95,9 +96,11 @@ public sealed class StatusForm : Form
         }));
         buttonRow.Controls.Add(MakeButton("Save paths", (_, _) => SavePaths()));
 
+        // Dock the bottom bars first (last added is docked first) so the
+        // status layout cannot cover the buttons and hide the window contents.
+        Controls.Add(layout);
         Controls.Add(_actionLabel);
         Controls.Add(buttonRow);
-        Controls.Add(layout);
 
         if (initialHealth is not null) UpdateHealth(initialHealth);
         else _summaryLabel.Text = "Checking…";

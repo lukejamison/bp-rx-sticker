@@ -13,6 +13,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private StatusForm? _statusForm;
     private HealthSnapshot? _lastHealth;
     private Icon? _currentIcon;
+    private HealthState? _shownIconState;
 
     public TrayAppContext()
     {
@@ -50,6 +51,10 @@ internal sealed class TrayAppContext : ApplicationContext
         _pollTimer.Tick += async (_, _) => await RefreshAsync();
         _pollTimer.Start();
 
+        // Tray-only startup leaves no taskbar button, and a dead tray icon
+        // (see TrayIconFactory) made the whole app look missing. Open the
+        // status window so there is always something to click.
+        ShowStatusForm();
         _ = RefreshAsync();
     }
 
@@ -143,9 +148,15 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SetTrayIcon(HealthState state)
     {
-        _currentIcon?.Dispose();
-        _currentIcon = TrayIconFactory.Create(state);
-        _trayIcon.Icon = _currentIcon;
+        if (_shownIconState == state && _currentIcon is not null) return;
+
+        var next = TrayIconFactory.Create(state);
+        var previous = _currentIcon;
+        _currentIcon = next;
+        _shownIconState = state;
+        _trayIcon.Icon = next;
+        _trayIcon.Visible = true;
+        previous?.Dispose();
     }
 
     protected override void Dispose(bool disposing)
