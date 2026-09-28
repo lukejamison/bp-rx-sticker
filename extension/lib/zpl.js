@@ -117,7 +117,10 @@
     const fields = [];
     const rawName = String(data.itemName || '').trim() || 'ITEM';
     const nameLayout = fitWrappedText(rawName, contentWidth, [20, 18, 17], 3);
-    let y = margin;
+    // 5pt at this label's dpi. The name was starting on the top edge and the
+    // printer clipped the first line.
+    const nameDrop = Math.round((5 * printWidth) / 72);
+    let y = margin + nameDrop;
     const nameHeight = nameLayout.font * nameLayout.lines + (nameLayout.lines - 1);
     fields.push({
       role: 'name',
@@ -168,8 +171,8 @@
     const priceTop = y;
     const priceRoom = bandTop - priceTop - detailHeight - gap;
     const price = formatPrice(data.cost);
-    const priceFont = Math.max(24, Math.min(price.length >= 8 ? 32 : 40, priceRoom));
-    if (priceRoom >= 24) {
+    const priceFont = Math.min(price.length >= 8 ? 32 : 40, priceRoom);
+    if (priceFont >= 16) {
       fields.push({
         role: 'price',
         x: margin,
