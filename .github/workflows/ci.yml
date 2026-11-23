@@ -15,7 +15,7 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Extension tests
         shell: pwsh
-        run: node --test extension/tests
+        run: node --test extension/tests/lib.test.js
       - name: Bridge syntax
         shell: pwsh
         run: node --check extension/print-bridge/server.js

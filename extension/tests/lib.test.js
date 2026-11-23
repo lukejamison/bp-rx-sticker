@@ -1,4 +1,4 @@
-// Run with: node --test extension/tests
+// Run with: node --test extension/tests/lib.test.js
 // The extension libs are plain browser scripts (no exports), so load them in a vm context.
 const test = require('node:test');
 const assert = require('node:assert/strict');

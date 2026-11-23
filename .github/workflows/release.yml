@@ -20,7 +20,7 @@ jobs:
 
       - name: Run tests
         shell: pwsh
-        run: node --test extension/tests
+        run: node --test extension/tests/lib.test.js
 
       - name: Check bridge syntax
         shell: pwsh
