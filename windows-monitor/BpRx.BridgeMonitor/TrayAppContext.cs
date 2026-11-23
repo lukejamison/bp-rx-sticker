@@ -166,6 +166,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _statusForm = new StatusForm(_coordinator, _lastHealth)
         {
             UpdateAction = OnUpdateClickedAsync,
+            OpenLogsAction = OpenLogFolder,
         };
         _statusForm.SetUpdateAvailable(_pendingUpdate);
         _statusForm.FormClosed += (_, _) => _statusForm = null;

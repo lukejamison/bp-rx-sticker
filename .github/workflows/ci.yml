@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Extension tests
+        shell: pwsh
+        run: node --test extension/tests
+      - name: Bridge syntax
+        shell: pwsh
+        run: node --check extension/print-bridge/server.js
+      - name: Build monitor
+        shell: pwsh
+        run: dotnet build windows-monitor/BpRx.BridgeMonitor/BpRx.BridgeMonitor.csproj -c Release -warnaserror-
