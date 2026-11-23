@@ -10,9 +10,11 @@ OneScan workstation only. Do these in order.
 
 - [ ] Windows 10/11 PC on the pharmacy network
 - [ ] [Node.js LTS](https://nodejs.org) installed (`node -v` works in cmd)
-- [ ] [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) installed (`dotnet -v` works) — needed to build the monitor app
+- [ ] [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) installed (or run `winget install Microsoft.DotNet.DesktopRuntime.8`)
 - [ ] Google Chrome
-- [ ] This repo copied to the PC (e.g. `C:\bp-rx-sticker`)
+- [ ] Latest release unzipped to `C:\bp-rx-sticker` — download `bp-rx-sticker-release.zip` from the
+      [Releases page](https://github.com/lukejamison/bp-rx-sticker/releases/latest), right-click → Extract All
+      (the folder must contain `extension` and `windows-monitor`)
 - [ ] Zebra printer IP ready (e.g. `172.18.129.123`)
 
 ---
@@ -62,15 +64,18 @@ Click **Save settings**, then:
 
 ---
 
-## 3. Build & install the Windows monitor app
+## 3. Install the Windows monitor app
 
-In cmd (as Administrator), from the repo root:
+The release already contains the built app. In cmd (as Administrator), from `C:\bp-rx-sticker`:
 
 ```bat
 cd windows-monitor
-build.bat
 install-monitor.bat
 ```
+
+(Cloning the repo instead of using the release? Run `build.bat` first; it needs the .NET 8 SDK.)
+
+From now on the app updates itself: it offers **Install update** when a new release is published.
 
 Accept the **UAC** prompt. Look for the tray icon near the clock (green / amber / red).
 

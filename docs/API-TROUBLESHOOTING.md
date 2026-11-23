@@ -115,7 +115,7 @@ sudo systemctl status prx-api
 ## Automated diagnostic script
 
 ```bash
-./diagnose-api.sh
+./scripts/diagnose-api.sh
 ```
 
 ---

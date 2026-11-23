@@ -85,6 +85,25 @@ Tray menu → **Send logs to IT**, or use the button in the status window.
 
 Payload includes elevation status, task last result/run time, logs, and config.
 
+## Updates (self-update)
+
+The tray app checks GitHub Releases 20 seconds after start and every 6 hours. When a newer version exists you get a balloon, and the tray menu / status window button changes to **Install vX.Y.Z**. You can also click **Check for updates** any time.
+
+Installing downloads `bp-rx-sticker-release.zip`, verifies its SHA-256, then a short PowerShell script (after the monitor exits) copies in:
+
+- `windows-monitor/publish/*` (the new exe; the old one is kept as `BpRx.BridgeMonitor.exe.previous`)
+- `extension/*` including the print bridge
+
+It never overwrites `appsettings.json` or `config.local.env`, restarts the bridge and monitor tasks, and logs to `%TEMP%\bprx-update.log`. If the extension changed, reload it at `chrome://extensions`.
+
+### Publishing a release (dev machine)
+
+1. Bump `extension/manifest.json` / `BRIDGE_VERSION` as usual.
+2. `git tag v0.3.0 && git push origin v0.3.0`
+3. The `Release` workflow builds the exe, zips everything, and publishes the release. The tag becomes the monitor's version.
+
+The release must be **public** (or the repo public) for PCs to download without a token. Existing PCs need to be updated once manually (`update.bat` or a rebuild) to get a self-updating build.
+
 ## Full workstation setup (tomorrow checklist)
 
 ```bat

@@ -113,6 +113,11 @@ public sealed class StatusForm : Form
             SetActionMessage(msg, ok);
         }));
         buttonRow.Controls.Add(MakeButton("Save paths", (_, _) => SavePaths()));
+        _updateButton = MakeButton("Check for updates", async (_, _) =>
+        {
+            if (UpdateAction is not null) await UpdateAction();
+        });
+        buttonRow.Controls.Add(_updateButton);
 
         // Dock the bottom bars first (last added is docked first) so the
         // status layout cannot cover the buttons and hide the window contents.
@@ -164,6 +169,18 @@ public sealed class StatusForm : Form
     }
 
     private HealthSnapshot? _lastHealth;
+    private readonly Button _updateButton;
+
+    /// <summary>Invoked by the update button (check, or install when one is pending).</summary>
+    public Func<Task>? UpdateAction { get; init; }
+
+    public void SetUpdateAvailable(UpdateInfo? info)
+    {
+        _updateButton.Text = info is null ? "Check for updates" : $"Install v{info.Version.ToString(3)}";
+        Text = info is null
+            ? $"BP RX Bridge Monitor v{UpdateService.CurrentVersionText}"
+            : $"BP RX Bridge Monitor v{UpdateService.CurrentVersionText} — update available";
+    }
 
     public void UpdateHealth(HealthSnapshot health)
     {

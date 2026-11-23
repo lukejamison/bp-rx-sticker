@@ -27,7 +27,13 @@ Bump the version whenever you change that component's code. For bridge changes, 
 
 ---
 
-## On the workstation
+## Easiest: release + self-update
+
+Tag a release (`git tag v0.3.0 && git push origin v0.3.0`). Each PC's tray app offers **Install update** within 6 hours, or immediately via **Check for updates**. After it applies, reload the extension at `chrome://extensions` if it changed. See [`windows-monitor/README.md`](./windows-monitor/README.md#updates-self-update). The manual steps below remain as a fallback.
+
+---
+
+## On the workstation (manual fallback)
 
 ### Step 1 — Get new code
 

@@ -1,0 +1,52 @@
+name: Release
+
+# Push a tag like v0.3.0 to build and publish a release the tray app can self-update from.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Check bridge syntax
+        shell: pwsh
+        run: node --check extension/print-bridge/server.js
+
+      - name: Publish monitor
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          dotnet publish windows-monitor/BpRx.BridgeMonitor/BpRx.BridgeMonitor.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true -p:Version=$version `
+            -o stage/windows-monitor/publish
+
+      - name: Assemble and zip
+        shell: pwsh
+        run: |
+          Copy-Item extension stage/extension -Recurse
+          Copy-Item windows-monitor/install-monitor.bat, windows-monitor/install-monitor.ps1 stage/windows-monitor/
+          Copy-Item INSTALL-WINDOWS.md stage/
+          Remove-Item stage/extension/print-bridge/logs -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item stage/extension/print-bridge/config.local.env -Force -ErrorAction SilentlyContinue
+          Get-ChildItem stage -Recurse -Filter *.pdb | Remove-Item -Force
+          Compress-Archive -Path stage/* -DestinationPath bp-rx-sticker-release.zip
+          $hash = (Get-FileHash bp-rx-sticker-release.zip -Algorithm SHA256).Hash
+          "$hash  bp-rx-sticker-release.zip" | Out-File bp-rx-sticker-release.zip.sha256 -Encoding ascii
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            bp-rx-sticker-release.zip
+            bp-rx-sticker-release.zip.sha256

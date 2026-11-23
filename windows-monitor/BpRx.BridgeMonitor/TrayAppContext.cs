@@ -42,6 +42,9 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add("Send logs to IT", null, async (_, _) => await SendLogsAsync());
         menu.Items.Add("Open log folder", null, (_, _) => OpenLogFolder());
         menu.Items.Add(new ToolStripSeparator());
+        _updateItem = new ToolStripMenuItem("Check for updates", null, async (_, _) => await OnUpdateClickedAsync());
+        menu.Items.Add(_updateItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
         _trayIcon.ContextMenuStrip = menu;
         _trayIcon.DoubleClick += (_, _) => ShowStatusForm();
@@ -56,6 +59,97 @@ internal sealed class TrayAppContext : ApplicationContext
         // status window so there is always something to click.
         ShowStatusForm();
         _ = RefreshAsync();
+
+        _trayIcon.BalloonTipClicked += async (_, _) =>
+        {
+            if (_balloonIsUpdate && _pendingUpdate is not null) await PromptInstallAsync();
+        };
+
+        // Look for a new release shortly after start, then every 6 hours.
+        _updateTimer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = (int)TimeSpan.FromHours(6).TotalMilliseconds;
+            await CheckForUpdatesAsync(manual: false);
+        };
+        _updateTimer.Start();
+    }
+
+    private readonly UpdateService _updater = new();
+    private readonly ToolStripMenuItem _updateItem;
+    private readonly System.Windows.Forms.Timer _updateTimer;
+    private UpdateInfo? _pendingUpdate;
+    private bool _balloonIsUpdate;
+    private bool _updating;
+
+    private async Task OnUpdateClickedAsync()
+    {
+        if (_pendingUpdate is not null) await PromptInstallAsync();
+        else await CheckForUpdatesAsync(manual: true);
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updating) return;
+        try
+        {
+            var info = await _updater.CheckAsync();
+            _pendingUpdate = info;
+            if (info is null)
+            {
+                _updateItem.Text = "Check for updates";
+                _statusForm?.SetUpdateAvailable(null);
+                if (manual) ShowBalloon($"Up to date (v{UpdateService.CurrentVersionText}).", ToolTipIcon.Info, false);
+                return;
+            }
+
+            _coordinator.Logs.WriteMonitorLog("INFO", $"Update available: {info.Tag}");
+            _updateItem.Text = $"Install update v{info.Version.ToString(3)}…";
+            _statusForm?.SetUpdateAvailable(info);
+            ShowBalloon($"Version {info.Version.ToString(3)} is available. Click to install.", ToolTipIcon.Info, true);
+            if (manual) await PromptInstallAsync();
+        }
+        catch (Exception ex)
+        {
+            _coordinator.Logs.WriteMonitorLog("WARN", $"Update check failed: {ex.Message}");
+            if (manual) ShowBalloon($"Update check failed: {ex.Message}", ToolTipIcon.Error, false);
+        }
+    }
+
+    public async Task PromptInstallAsync()
+    {
+        var info = _pendingUpdate;
+        if (info is null || _updating) return;
+
+        var answer = MessageBox.Show(
+            $"Version {info.Version.ToString(3)} is available (you have {UpdateService.CurrentVersionText}).\n\n" +
+            "The monitor will restart and the print bridge will restart briefly. " +
+            "If the Chrome extension changed, reload it at chrome://extensions afterwards.\n\nInstall now?",
+            "BP RX update", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes) return;
+
+        _updating = true;
+        try
+        {
+            ShowBalloon("Downloading update…", ToolTipIcon.Info, false);
+            _statusForm?.SetActionMessage("Downloading update…", true);
+            await _updater.InstallAsync(info);
+            _coordinator.Logs.WriteMonitorLog("INFO", $"Update {info.Tag} downloaded; restarting to apply");
+            ExitThread();
+        }
+        catch (Exception ex)
+        {
+            _updating = false;
+            _coordinator.Logs.WriteMonitorLog("ERROR", $"Update failed: {ex.Message}");
+            ShowBalloon($"Update failed: {ex.Message}", ToolTipIcon.Error, false);
+            _statusForm?.SetActionMessage($"Update failed: {ex.Message}", false);
+        }
+    }
+
+    private void ShowBalloon(string text, ToolTipIcon icon, bool isUpdate)
+    {
+        _balloonIsUpdate = isUpdate;
+        _trayIcon.ShowBalloonTip(6000, "BP RX", text, icon);
     }
 
     private void ShowStatusForm()
@@ -69,7 +163,11 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        _statusForm = new StatusForm(_coordinator, _lastHealth);
+        _statusForm = new StatusForm(_coordinator, _lastHealth)
+        {
+            UpdateAction = OnUpdateClickedAsync,
+        };
+        _statusForm.SetUpdateAvailable(_pendingUpdate);
         _statusForm.FormClosed += (_, _) => _statusForm = null;
         _statusForm.Show();
     }
@@ -165,6 +263,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             _pollTimer.Stop();
             _pollTimer.Dispose();
+            _updateTimer.Dispose();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
             _currentIcon?.Dispose();
